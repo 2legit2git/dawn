@@ -1,0 +1,138 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: macos-arm64
+            artifact: dawn-macos-arm64
+          - os: macos-15-intel
+            target: macos-x64
+            artifact: dawn-macos-x64
+          - os: ubuntu-latest
+            target: linux-x64
+            artifact: dawn-linux-x64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+            artifact: dawn-linux-arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies (Linux)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo rm -f /var/lib/man-db/auto-update
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev
+
+      - name: Build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j
+          strip build/dawn
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp build/dawn dist/dawn
+          cd dist && tar -czvf ${{ matrix.artifact }}.tar.gz dawn
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        run: |
+          gh release create ${{ github.ref_name }} \
+            --generate-notes \
+            artifacts/**/*.tar.gz
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update Homebrew formula
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          echo "Version: $VERSION"
+
+          # Get SHA256 for arm64 and x64 binaries
+          ARM64_URL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/dawn-macos-arm64.tar.gz"
+          X64_URL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/dawn-macos-x64.tar.gz"
+          ARM64_SHA=$(curl -sL "$ARM64_URL" | sha256sum | cut -d' ' -f1)
+          X64_SHA=$(curl -sL "$X64_URL" | sha256sum | cut -d' ' -f1)
+
+          echo "ARM64 SHA: $ARM64_SHA"
+          echo "X64 SHA: $X64_SHA"
+
+          # Clone homebrew tap and update formula
+          git clone https://x-access-token:${{ secrets.HOMEBREW_TAP_TOKEN }}@github.com/andrewmd5/homebrew-tap.git tap
+
+          cat > tap/Formula/dawn.rb << EOF
+          class Dawn < Formula
+            desc "Distraction-free terminal writing environment with live markdown rendering"
+            homepage "https://github.com/${{ github.repository }}"
+            version "$VERSION"
+            license "MIT"
+
+            on_macos do
+              on_arm do
+                url "$ARM64_URL"
+                sha256 "$ARM64_SHA"
+              end
+              on_intel do
+                url "$X64_URL"
+                sha256 "$X64_SHA"
+              end
+            end
+
+            def install
+              bin.install "dawn"
+            end
+
+            test do
+              assert_match "dawn", shell_output("#{bin}/dawn --help")
+            end
+          end
+          EOF
+
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/dawn.rb
+          git commit -m "dawn $VERSION"
+          git push
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        continue-on-error: true

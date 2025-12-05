@@ -1,0 +1,264 @@
+// dawn_utils.c
+
+#include "dawn_utils.h"
+#include "dawn_gap.h"
+#include "dawn_wrap.h"
+#include "dawn_md.h"
+#include "dawn_theme.h"
+
+//! Current text scale for output (1-7, 1=normal)
+int current_text_scale = 1;
+
+//! Current fractional scale numerator (0-15, 0 = no fraction)
+int current_frac_num = 0;
+
+//! Current fractional scale denominator (0-15)
+int current_frac_denom = 0;
+
+// #region Path Utilities
+
+void get_chat_path(const char *session_path, char *chat_path, size_t bufsize) {
+    size_t len = strlen(session_path);
+    if (len > 3 && strcmp(session_path + len - 3, ".md") == 0) {
+        // Replace .md with .chat.json
+        size_t base_len = len - 3;
+        snprintf(chat_path, bufsize, "%.*s.chat.json", (int)base_len, session_path);
+    } else {
+        snprintf(chat_path, bufsize, "%s.chat.json", session_path);
+    }
+}
+
+// #endregion
+
+// #region Text Utilities
+
+size_t normalize_line_endings(char *buf, size_t len) {
+    size_t read = 0, write = 0;
+    while (read < len) {
+        if (buf[read] == '\r') {
+            // CRLF -> LF, or standalone CR -> LF
+            buf[write++] = '\n';
+            read++;
+            if (read < len && buf[read] == '\n') read++;  // skip LF after CR
+        } else {
+            buf[write++] = buf[read++];
+        }
+    }
+    return write;
+}
+
+// Word count cache - avoids rescanning entire document every frame
+static struct {
+    int count;          // Cached word count
+    size_t text_len;    // Text length when cache was computed
+    bool valid;         // Cache validity
+} word_cache = {0, 0, false};
+
+void word_count_invalidate(void) {
+    word_cache.valid = false;
+}
+
+int count_words(const GapBuffer *gb) {
+    size_t len = gap_len(gb);
+
+    // Check if cache is valid
+    if (word_cache.valid && word_cache.text_len == len) {
+        return word_cache.count;
+    }
+
+    // Recompute word count
+    int words = 0;
+    bool in_word = false;
+
+    for (size_t i = 0; i < len; i++) {
+        char c = gap_at(gb, i);
+        if (ISSPACE_(c)) {
+            in_word = false;
+        } else if (!in_word) {
+            in_word = true;
+            words++;
+        }
+    }
+
+    // Update cache
+    word_cache.count = words;
+    word_cache.text_len = len;
+    word_cache.valid = true;
+
+    return words;
+}
+
+// #endregion
+
+// #region Grapheme Output
+
+int output_grapheme(const GapBuffer *gb, size_t *pos) {
+    size_t len = gap_len(gb);
+    if (*pos >= len) return 0;
+
+    const PlatformBackend *p = platform_get();
+
+    // Determine if we need any scaling
+    bool needs_scaling = (current_text_scale > 1 || (current_frac_num > 0 && current_frac_denom > 0))
+                         && platform_has(PLATFORM_CAP_TEXT_SIZING);
+    bool has_frac = (current_frac_num > 0 && current_frac_denom > current_frac_num);
+
+    // Check for typographic replacements first
+    size_t consumed = 0;
+    const char *replacement = md_check_typo_replacement(gb, *pos, &consumed);
+    if (replacement) {
+        if (needs_scaling) {
+            if (has_frac) {
+                print_scaled_frac_str(replacement, strlen(replacement),
+                                      current_text_scale, current_frac_num, current_frac_denom);
+            } else {
+                print_scaled_str(replacement, strlen(replacement), current_text_scale);
+            }
+            *pos += consumed;
+            return current_text_scale;
+        } else {
+            if (p && p->write_str) {
+                p->write_str(replacement, strlen(replacement));
+            }
+            *pos += consumed;
+            return 1;
+        }
+    }
+
+    // Read first byte
+    char first = gap_at(gb, *pos);
+
+    // ASCII fast path
+    if ((first & 0x80) == 0) {
+        if (needs_scaling) {
+            if (has_frac) {
+                print_scaled_frac_char(first, current_text_scale, current_frac_num, current_frac_denom);
+            } else {
+                print_scaled_char(first, current_text_scale);
+            }
+            (*pos)++;
+            return current_text_scale;
+        } else {
+            if (p && p->write_char) {
+                p->write_char(first);
+            }
+            (*pos)++;
+            return 1;
+        }
+    }
+
+    // Multi-byte UTF-8: collect bytes
+    uint8_t bytes[8];
+    int expected = utf8proc_utf8class[(uint8_t)first];
+    if (expected < 1) expected = 1;
+
+    int n = 0;
+    size_t bytepos = *pos;
+    while (bytepos < len && n < expected && n < 7) {
+        bytes[n++] = (uint8_t)gap_at(gb, bytepos);
+        bytepos++;
+    }
+    bytes[n] = 0;
+
+    // Get grapheme properties for width
+    utf8proc_int32_t codepoint;
+    utf8proc_iterate(bytes, n, &codepoint);
+    int width = utf8proc_charwidth(codepoint);
+    if (width < 0) width = 1;
+
+    // Output the bytes with text sizing if needed
+    if (needs_scaling) {
+        if (has_frac) {
+            print_scaled_frac_str((const char *)bytes, (size_t)n,
+                                  current_text_scale, current_frac_num, current_frac_denom);
+        } else {
+            print_scaled_str((const char *)bytes, (size_t)n, current_text_scale);
+        }
+        *pos += (size_t)n;
+        return width * current_text_scale;
+    } else {
+        if (p && p->write_str) {
+            p->write_str((const char *)bytes, (size_t)n);
+        }
+        *pos += (size_t)n;
+        return width;
+    }
+}
+
+int output_grapheme_str(const char *text, size_t len, size_t *pos) {
+    if (*pos >= len) return 0;
+
+    const PlatformBackend *p = platform_get();
+    uint8_t first = (uint8_t)text[*pos];
+
+    // ASCII fast path
+    if ((first & 0x80) == 0) {
+        if (p && p->write_char) {
+            p->write_char((char)first);
+        }
+        (*pos)++;
+        return 1;
+    }
+
+    // Multi-byte UTF-8
+    int n = utf8proc_utf8class[first];
+    if (n < 1) n = 1;
+    if (*pos + (size_t)n > len) n = (int)(len - *pos);
+
+    // Get width
+    utf8proc_int32_t codepoint;
+    utf8proc_iterate((const utf8proc_uint8_t *)&text[*pos], n, &codepoint);
+    int width = utf8proc_charwidth(codepoint);
+    if (width < 0) width = 1;
+
+    // Output
+    if (p && p->write_str) {
+        p->write_str(&text[*pos], (size_t)n);
+    }
+    *pos += (size_t)n;
+
+    return width;
+}
+
+// #endregion
+
+// #region Text Wrapping
+
+int chat_wrap_line(const char *text, size_t len, size_t start, int width) {
+    if (start >= len) return 0;
+    if (text[start] == '\n') return -1;
+
+    int col = 0;
+    size_t pos = start;
+    size_t last_break = start;
+
+    while (pos < len) {
+        utf8proc_int32_t cp;
+        utf8proc_ssize_t bytes = utf8proc_iterate((const utf8proc_uint8_t *)&text[pos], len - pos, &cp);
+        if (bytes <= 0) { pos++; continue; }
+
+        if (cp == '\n') return (int)(pos - start);
+
+        int gw = utf8proc_charwidth(cp);
+        if (gw < 0) gw = 1;
+        if (gw == 0) gw = 1;
+
+        if (col + gw > width && col > 0) {
+            if (last_break > start) {
+                return (int)(last_break - start);
+            }
+            return (int)(pos - start);
+        }
+
+        col += gw;
+        pos += (size_t)bytes;
+
+        if (cp == ' ' || cp == '-') {
+            last_break = pos;
+        }
+    }
+
+    return (int)(pos - start);
+}
+
+// #endregion

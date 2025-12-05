@@ -1,0 +1,23 @@
+# Build output
+build/
+
+web/
+
+# Object files
+*.o
+*.obj
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Session files (user data)
+.dawn/
+
+# JavaScript/Node
+node_modules/
+bun.lockb
+.cache

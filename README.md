@@ -51,6 +51,8 @@ The architecture makes adding new frontends relatively simple. Implement the pla
 +---------------------------------------------+
 ```
 
+![Table of contents](assets/browser.png)
+
 ---
 
 ## Features
@@ -120,6 +122,8 @@ Press `Ctrl+F` to hide all UI (status bar, word count, timer) leaving only your 
 - **Footnotes** (`Ctrl+N`) - Jump between reference and definition
 
 ![Table of contents](assets/toc.png)
+
+![Search](assets/search.png)
 
 ---
 

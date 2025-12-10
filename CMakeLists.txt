@@ -13,62 +13,68 @@ file(GLOB HIGHLIGHT_SRCS src/highlight/*.c src/highlight/lang/*.c)
 
 set(PCRE2_BUILD_PCRE2GREP OFF CACHE BOOL "" FORCE)
 set(PCRE2_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(PCRE2_SUPPORT_JIT ON CACHE BOOL "" FORCE)
+if(EMSCRIPTEN)
+    set(PCRE2_SUPPORT_JIT OFF CACHE BOOL "" FORCE)
+else()
+    set(PCRE2_SUPPORT_JIT ON CACHE BOOL "" FORCE)
+endif()
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory(third-party/pcre2)
 
 add_subdirectory(third-party/utf8proc)
 
-find_package(CURL REQUIRED)
+if(NOT EMSCRIPTEN)
+    find_package(CURL REQUIRED)
 
-add_executable(dawn
-    ${DAWN_SRCS}
-    ${HIGHLIGHT_SRCS}
-    src/platform_posix.c
-    src/main_term.c
-    third-party/cJSON.c
-)
-
-target_include_directories(dawn PRIVATE
-    src
-    third-party
-    ${CMAKE_BINARY_DIR}/third-party/pcre2
-    third-party/pcre2/src
-)
-
-target_compile_options(dawn PRIVATE
-    -Wall -Wextra -Wpedantic -Werror -Wno-unused-function
-    $<$<C_COMPILER_ID:AppleClang,Clang>:-Wno-keyword-macro -Wno-newline-eof>
-)
-target_compile_definitions(dawn PRIVATE VERSION="${DAWN_VERSION}")
-
-target_link_libraries(dawn PRIVATE pcre2-8-static utf8proc CURL::libcurl)
-
-if(APPLE)
-    target_link_libraries(dawn PRIVATE "-framework ApplicationServices")
-endif()
-
-if(APPLE AND USE_LIBAI)
-    target_sources(dawn PRIVATE src/search.c)
-    target_compile_definitions(dawn PRIVATE USE_LIBAI)
-    target_include_directories(dawn PRIVATE libai)
-    target_compile_options(dawn PRIVATE -Wno-unused-variable -Wno-unused-but-set-variable)
-
-    add_custom_target(libai_build
-        COMMAND make static-rel
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/libai
+    add_executable(dawn
+        ${DAWN_SRCS}
+        ${HIGHLIGHT_SRCS}
+        src/platform_posix.c
+        src/main_term.c
+        third-party/cJSON.c
     )
-    add_dependencies(dawn libai_build)
 
-    target_link_libraries(dawn PRIVATE
-        ${CMAKE_SOURCE_DIR}/libai/build/static/${CMAKE_SYSTEM_PROCESSOR}/release/libai.a
-        "-framework Foundation"
-        "-framework FoundationModels"
-        -L/usr/lib/swift -lswiftCore
+    target_include_directories(dawn PRIVATE
+        src
+        third-party
+        ${CMAKE_BINARY_DIR}/third-party/pcre2
+        third-party/pcre2/src
     )
-endif()
 
-if(EMSCRIPTEN)
+    target_compile_options(dawn PRIVATE
+        -Wall -Wextra -Wpedantic -Werror -Wno-unused-function
+        $<$<C_COMPILER_ID:AppleClang,Clang>:-Wno-keyword-macro -Wno-newline-eof>
+    )
+    target_compile_definitions(dawn PRIVATE VERSION="${DAWN_VERSION}")
+
+    target_link_libraries(dawn PRIVATE pcre2-8-static utf8proc CURL::libcurl)
+
+    if(APPLE)
+        target_link_libraries(dawn PRIVATE "-framework ApplicationServices")
+    endif()
+
+    if(APPLE AND USE_LIBAI)
+        target_sources(dawn PRIVATE src/search.c)
+        target_compile_definitions(dawn PRIVATE USE_LIBAI)
+        target_include_directories(dawn PRIVATE libai)
+        target_compile_options(dawn PRIVATE -Wno-unused-variable -Wno-unused-but-set-variable)
+
+        add_custom_target(libai_build
+            COMMAND make static-rel
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/libai
+        )
+        add_dependencies(dawn libai_build)
+
+        target_link_libraries(dawn PRIVATE
+            ${CMAKE_SOURCE_DIR}/libai/build/static/${CMAKE_SYSTEM_PROCESSOR}/release/libai.a
+            "-framework Foundation"
+            "-framework FoundationModels"
+            -L/usr/lib/swift -lswiftCore
+        )
+    endif()
+
+    install(TARGETS dawn RUNTIME DESTINATION bin)
+else()
     file(GLOB WEB_SRCS src/dawn*.c)
     list(FILTER WEB_SRCS EXCLUDE REGEX "dawn_args.c")
 
@@ -99,6 +105,7 @@ if(EMSCRIPTEN)
     target_link_options(dawn-web PRIVATE
         -sWASM=1
         -sALLOW_MEMORY_GROWTH=1
+        -sASYNCIFY
         -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString,stringToUTF8,lengthBytesUTF8,setValue,getValue
         -sEXPORTED_FUNCTIONS=_main,_malloc,_free,_web_on_resize,_web_on_key,_web_on_mouse,_dawn_web_load_file,_dawn_web_new_document,_dawn_web_save
         -sFORCE_FILESYSTEM=1
@@ -106,5 +113,3 @@ if(EMSCRIPTEN)
         --shell-file ${CMAKE_SOURCE_DIR}/src/shell.html
     )
 endif()
-
-install(TARGETS dawn RUNTIME DESTINATION bin)

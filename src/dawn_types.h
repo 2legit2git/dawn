@@ -41,7 +41,9 @@ typedef PlatformColor Color;
 
 #define APP_NAME "dawn"
 #define APP_TAGLINE "Draft Anything, Write Now"
-#define VERSION "1.0.0"
+#ifndef VERSION
+#define VERSION "dev"
+#endif
 
 //! Maximum document size (1MB)
 #define MAX_TEXT_SIZE (1024 * 1024)

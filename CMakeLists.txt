@@ -6,6 +6,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(USE_LIBAI "Build with Apple Intelligence (macOS 26+)" OFF)
+set(DAWN_VERSION "dev" CACHE STRING "Version string")
 
 file(GLOB DAWN_SRCS src/dawn*.c)
 file(GLOB HIGHLIGHT_SRCS src/highlight/*.c src/highlight/lang/*.c)
@@ -39,6 +40,7 @@ target_compile_options(dawn PRIVATE
     -Wall -Wextra -Wpedantic -Werror -Wno-unused-function
     $<$<C_COMPILER_ID:AppleClang,Clang>:-Wno-keyword-macro -Wno-newline-eof>
 )
+target_compile_definitions(dawn PRIVATE VERSION="${DAWN_VERSION}")
 
 target_link_libraries(dawn PRIVATE pcre2-8-static utf8proc CURL::libcurl)
 

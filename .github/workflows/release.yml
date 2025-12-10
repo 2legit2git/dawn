@@ -42,7 +42,9 @@ jobs:
 
       - name: Build
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DDAWN_VERSION="$VERSION"
           cmake --build build -j
           strip build/dawn
 

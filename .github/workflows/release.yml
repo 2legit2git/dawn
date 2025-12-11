@@ -124,7 +124,7 @@ jobs:
             end
 
             test do
-              assert_match "dawn", shell_output("#{bin}/dawn --help")
+              assert_match "dawn", shell_output("#{bin}/dawn -h")
             end
           end
           EOF

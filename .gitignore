@@ -22,3 +22,6 @@ web/
 node_modules/
 bun.lockb
 .cache
+fuzz/fuzz-bin.dSYM
+fuzz/output
+fuzz/fuzz-bin

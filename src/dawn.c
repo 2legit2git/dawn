@@ -105,7 +105,7 @@ typedef struct {
 // #region Macros for Common Patterns
 
 //! Check if cursor is in a range and syntax hiding is disabled
-#define CURSOR_IN(start, end) cursor_in_range(app.cursor, (start), (end), app.hide_cursor_syntax)
+#define CURSOR_IN(start, end) CURSOR_IN_RANGE(app.cursor, (start), (end), app.hide_cursor_syntax)
 
 //! Check if editing is allowed (not in focus mode or preview mode)
 #define CAN_EDIT() (!app.focus_mode && !app.preview_mode)
@@ -140,39 +140,30 @@ static inline Layout calc_layout(void) {
 }
 
 //! Calculate screen row from virtual row
-static inline int32_t vrow_to_screen(const Layout *L, int32_t vrow, int32_t scroll_y) {
-    return L->top_margin + (vrow - scroll_y);
-}
+#define VROW_TO_SCREEN(L, vrow, scroll_y) ((L)->top_margin + ((vrow) - (scroll_y)))
 
 //! Check if platform is in print mode
-static inline bool is_print_mode(void) {
-    return app.ctx.mode == DAWN_MODE_PRINT;
-}
+#define IS_PRINT_MODE() (app.ctx.mode == DAWN_MODE_PRINT)
 
 //! Check if screen row is visible (always true in print mode)
-static inline bool is_row_visible(const Layout *L, int32_t screen_row, int32_t max_row) {
-    if (is_print_mode()) return true;
-    return screen_row >= L->top_margin && screen_row <= max_row;
-}
+#define IS_ROW_VISIBLE(L, screen_row, max_row) \
+    (IS_PRINT_MODE() || ((screen_row) >= (L)->top_margin && (screen_row) < (max_row)))
 
 //! Check if cursor is within a range, respecting hide_cursor_syntax toggle
-static inline bool cursor_in_range(size_t cursor, size_t start, size_t end, bool hide_syntax) {
-    return (cursor >= start && cursor < end) && !hide_syntax;
-}
+#define CURSOR_IN_RANGE(cursor, start, end, hide_syntax) \
+    (((cursor) >= (start) && (cursor) < (end)) && !(hide_syntax))
 
 //! Track cursor position during rendering
-static inline void track_cursor(size_t pos, int32_t vrow, int32_t col, int32_t margin,
-                                int32_t *out_cursor_vrow, int32_t *out_cursor_col) {
-    if (pos == app.cursor) {
-        *out_cursor_vrow = vrow;
-        *out_cursor_col = margin + 1 + col;
+static inline void track_cursor(const RenderCtx *ctx, RenderState *rs) {
+    if (rs->pos == app.cursor) {
+        rs->cursor_virtual_row = rs->virtual_row;
+        rs->cursor_col = ctx->L.margin + 1 + rs->col_width;
     }
 }
 
 
-static inline int32_t get_line_scale(MdStyle line_style) {
-    return HAS_CAP(DAWN_CAP_TEXT_SIZING) ? block_get_scale(line_style) : 1;
-}
+#define GET_LINE_SCALE(line_style) \
+    (HAS_CAP(DAWN_CAP_TEXT_SIZING) ? block_get_scale(line_style) : 1)
 
 //! Skip leading whitespace for wrapped lines
 static inline size_t skip_leading_space(const GapBuffer *gb, size_t pos, size_t end) {
@@ -220,9 +211,7 @@ static inline const InlineRun *get_current_run(RenderState *rs) {
 }
 
 //! Check if position is at the start of a run
-static inline bool at_run_start(const RenderState *rs, const InlineRun *run) {
-    return run && rs->pos == run->byte_start;
-}
+#define AT_RUN_START(rs, run) ((run) && (rs)->pos == (run)->byte_start)
 
 //! Check if a list/blockquote item is empty
 static inline bool is_item_content_empty(const GapBuffer *gb, size_t cursor, size_t content_start) {
@@ -315,13 +304,17 @@ static inline void recalc_wrap_seg(int32_t text_width, int32_t col_width, size_t
 // #region Image Helpers
 
 //! Helper to resolve image path and calculate display rows
-static int32_t calc_image_rows_for_md(const GapBuffer *gb, size_t path_start, size_t path_len,
-                                   int32_t img_w, int32_t img_h, int32_t text_width, int32_t text_height,
-                                   char *resolved_out, size_t resolved_size) {
+static int32_t calc_image_rows_for_block(const RenderCtx *ctx, const Block *block,
+                                         char *resolved_out, size_t resolved_size) {
+    size_t path_start = block->data.image.path_start;
+    size_t path_len = block->data.image.path_len;
+    int32_t img_w = block->data.image.width;
+    int32_t img_h = block->data.image.height;
+
     char raw_path[512];
     size_t plen = path_len < sizeof(raw_path) - 1 ? path_len : sizeof(raw_path) - 1;
     for (size_t i = 0; i < plen; i++) {
-        raw_path[i] = gap_at(gb, path_start + i);
+        raw_path[i] = gap_at(&app.text, path_start + i);
     }
     raw_path[plen] = '\0';
 
@@ -339,12 +332,12 @@ static int32_t calc_image_rows_for_md(const GapBuffer *gb, size_t path_start, si
 
     int32_t img_cols = 0, img_rows_spec = 0;
 
-    if (img_w < 0) img_cols = text_width * (-img_w) / 100;
+    if (img_w < 0) img_cols = ctx->L.text_width * (-img_w) / 100;
     else if (img_w > 0) img_cols = img_w;
-    if (img_cols > text_width) img_cols = text_width;
-    if (img_cols <= 0) img_cols = text_width / 2;
+    if (img_cols > ctx->L.text_width) img_cols = ctx->L.text_width;
+    if (img_cols <= 0) img_cols = ctx->L.text_width / 2;
 
-    if (img_h < 0) img_rows_spec = text_height * (-img_h) / 100;
+    if (img_h < 0) img_rows_spec = ctx->L.text_height * (-img_h) / 100;
     else if (img_h > 0) img_rows_spec = img_h;
 
     int32_t pixel_w, pixel_h;
@@ -697,32 +690,27 @@ static void chat_print_md(const char *text, size_t start, int32_t len) {
 // #region Render Helpers - Grapheme Output
 
 //! Output grapheme and advance position, returning display width
-static inline int32_t output_grapheme_advance(const GapBuffer *gb, size_t *pos, MdStyle active_style) {
-    return output_grapheme(gb, pos, active_style);
-}
+#define output_grapheme_advance(gb, pos, style) output_grapheme((gb), (pos), (style))
 
 //! Get grapheme width and next position without output
-static inline int32_t grapheme_width_next(const GapBuffer *gb, size_t pos, size_t *next) {
-    return gap_grapheme_width(gb, pos, next);
-}
+#define grapheme_width_next(gb, pos, next) gap_grapheme_width((gb), (pos), (next))
 
 //! Wrap check and render a grapheme (raw content - skips typo/emoji/entity replacements)
 //! Used by render_raw_dimmed_block and render_cursor_in_element for showing source
-static void wrap_and_render_grapheme_raw(const RenderCtx *ctx, size_t *pos, int32_t *col,
-                                         int32_t *vrow, int32_t *srow) {
+static void wrap_and_render_grapheme_raw(const RenderCtx *ctx, RenderState *rs) {
     size_t next;
-    int32_t gw = grapheme_width_next(&app.text, *pos, &next);
-    if (*col + gw > ctx->L.text_width && *col > 0) {
-        (*vrow)++;
-        *col = 0;
-        *srow = vrow_to_screen(&ctx->L, *vrow, app.scroll_y);
+    int32_t gw = grapheme_width_next(&app.text, rs->pos, &next);
+    if (rs->col_width + gw > ctx->L.text_width && rs->col_width > 0) {
+        rs->virtual_row++;
+        rs->col_width = 0;
     }
-    if (is_row_visible(&ctx->L, *srow, ctx->max_row)) {
-        if (*col == 0) move_to(*srow, ctx->L.margin + 1);
-        *col += output_grapheme_advance(&app.text, pos, MD_CODE);
+    int32_t screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
+    if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
+        if (rs->col_width == 0) move_to(screen_row, ctx->L.margin + 1);
+        rs->col_width += output_grapheme_advance(&app.text, &rs->pos, MD_CODE);
     } else {
-        *col += gw;
-        *pos = next;
+        rs->col_width += gw;
+        rs->pos = next;
     }
 }
 
@@ -764,18 +752,17 @@ static void update_title(void) {
 //! Render raw dimmed content (block element with newlines)
 //! Shows source text dimmed, skips all replacements (typo, emoji, entity)
 //! Selection background takes precedence when active
-static void render_raw_dimmed_block(const RenderCtx *ctx, size_t *pos, int32_t *col,
-                                    int32_t *vrow, int32_t *srow, size_t end_pos) {
+static void render_raw_dimmed_block(const RenderCtx *ctx, RenderState *rs, size_t end_pos) {
     size_t sel_s, sel_e;
     get_selection(&sel_s, &sel_e);
     bool selecting = has_selection();
 
-    while (*pos < end_pos && *pos < ctx->len) {
-        *srow = vrow_to_screen(&ctx->L, *vrow, app.scroll_y);
-        track_cursor(*pos, *vrow, *col, ctx->L.margin, ctx->cursor_virtual_row, ctx->cursor_col);
+    while (rs->pos < end_pos && rs->pos < ctx->len) {
+        int32_t screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
+        track_cursor(ctx, rs);
 
         // Set colors - selection takes precedence
-        bool in_sel = selecting && *pos >= sel_s && *pos < sel_e;
+        bool in_sel = selecting && rs->pos >= sel_s && rs->pos < sel_e;
         if (in_sel) {
             set_bg(get_select());
             set_fg(get_fg());
@@ -784,22 +771,22 @@ static void render_raw_dimmed_block(const RenderCtx *ctx, size_t *pos, int32_t *
             set_fg(get_dim());
         }
 
-        char ch = gap_at(&app.text, *pos);
+        char ch = gap_at(&app.text, rs->pos);
         if (ch == '\n') {
-            (*pos)++; (*vrow)++; *col = 0;
-            if (is_row_visible(&ctx->L, *srow, ctx->max_row))
-                move_to(*srow + 1, ctx->L.margin + 1);
+            rs->pos++; rs->virtual_row++; rs->col_width = 0;
+            if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row))
+                move_to(screen_row + 1, ctx->L.margin + 1);
         } else if (ch == '\t') {
-            int32_t tab_width = 4 - (*col % 4);
-            if (is_row_visible(&ctx->L, *srow, ctx->max_row)) {
+            int32_t tab_width = 4 - (rs->col_width % 4);
+            if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
                 for (int32_t ti = 0; ti < tab_width; ti++) {
                     out_char(' ');
                 }
             }
-            *col += tab_width;
-            (*pos)++;
+            rs->col_width += tab_width;
+            rs->pos++;
         } else {
-            wrap_and_render_grapheme_raw(ctx, pos, col, vrow, srow);
+            wrap_and_render_grapheme_raw(ctx, rs);
         }
     }
     set_fg(get_fg());
@@ -808,12 +795,11 @@ static void render_raw_dimmed_block(const RenderCtx *ctx, size_t *pos, int32_t *
 
 //! Render raw prefix with cursor tracking
 //! Shows source text dimmed, skips all replacements (typo, emoji, entity)
-static void render_raw_prefix(size_t *pos, size_t content_end, int32_t *col, size_t len,
-                              int32_t *cursor_vrow, int32_t *cursor_col, int32_t vrow, int32_t margin) {
+static void render_raw_prefix(const RenderCtx *ctx, RenderState *rs, size_t content_end) {
     set_fg(get_dim());
-    while (*pos < content_end && *pos < len) {
-        track_cursor(*pos, vrow, *col, margin, cursor_vrow, cursor_col);
-        *col += output_grapheme_advance(&app.text, pos, MD_CODE);
+    while (rs->pos < content_end && rs->pos < ctx->len) {
+        track_cursor(ctx, rs);
+        rs->col_width += output_grapheme_advance(&app.text, &rs->pos, MD_CODE);
     }
     set_fg(get_fg());
 }
@@ -1055,7 +1041,7 @@ static void calc_table_col_widths(int32_t col_count, int32_t text_width, int32_t
 static void render_table_hborder(const Layout *L, int32_t screen_row, int32_t max_row,
                                  int32_t col_count, const int32_t *col_widths,
                                  const char *left, const char *mid, const char *right) {
-    if (!is_row_visible(L, screen_row, max_row)) return;
+    if (!IS_ROW_VISIBLE(L, screen_row, max_row)) return;
     
     move_to(screen_row, L->margin + 1);
     set_fg(get_border());
@@ -1073,39 +1059,42 @@ static void render_table_hborder(const Layout *L, int32_t screen_row, int32_t ma
 // #region Block Element Rendering
 
 //! Render image element
-static bool render_image_element(const RenderCtx *ctx, RenderState *rs,
-                                 size_t img_alt_start, size_t img_alt_len,
-                                 size_t img_path_start, size_t img_path_len,
-                                 int32_t img_w, int32_t img_h, size_t img_total_len) {
-    (void)img_alt_start; (void)img_alt_len;
-    int32_t screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
+static bool render_image_element(const RenderCtx *ctx, RenderState *rs, const Block *block) {
+    size_t total_len = block->end - block->start;
 
-    if (cursor_in_range(app.cursor, rs->pos, rs->pos + img_total_len, app.hide_cursor_syntax)) {
+    if (CURSOR_IN_RANGE(app.cursor, rs->pos, rs->pos + total_len, app.hide_cursor_syntax)) {
         // Cursor is inside image - render raw dimmed using block renderer for proper newline handling
-        render_raw_dimmed_block(ctx, &rs->pos, &rs->col_width, &rs->virtual_row, &screen_row,
-                                rs->pos + img_total_len);
+        render_raw_dimmed_block(ctx, rs, rs->pos + total_len);
+        return true;
+    }
+
+    // Check if images are supported
+    if (!HAS_CAP(DAWN_CAP_IMAGES)) {
+        // No image support - render raw text
+        render_raw_dimmed_block(ctx, rs, rs->pos + total_len);
         return true;
     }
 
     // Track cursor position at image
-    track_cursor(rs->pos, rs->virtual_row, rs->col_width, ctx->L.margin,
-                &rs->cursor_virtual_row, &rs->cursor_col);
+    track_cursor(ctx, rs);
 
     char resolved_path[1024];
     resolved_path[0] = '\0';
-    int32_t img_rows = calc_image_rows_for_md(&app.text, img_path_start, img_path_len,
-                                          img_w, img_h, ctx->L.text_width, ctx->L.text_height,
-                                          resolved_path, sizeof(resolved_path));
+    int32_t img_rows = calc_image_rows_for_block(ctx, block, resolved_path, sizeof(resolved_path));
 
-    // Ensure at least 1 row for image placeholder if image can't be displayed
-    if (img_rows <= 0) img_rows = 1;
+    // If image can't be resolved, render raw text
+    if (!resolved_path[0] || img_rows <= 0) {
+        render_raw_dimmed_block(ctx, rs, rs->pos + total_len);
+        return true;
+    }
 
-    rs->pos += img_total_len;
+    rs->pos += total_len;
 
-    int32_t img_screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
+    int32_t img_screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
     int32_t img_end_row = img_screen_row + img_rows;
 
-    if (img_end_row > ctx->L.top_margin && img_screen_row < ctx->max_row && resolved_path[0]) {
+    if (img_end_row > ctx->L.top_margin && img_screen_row < ctx->max_row) {
+        int32_t img_w = block->data.image.width;
         int32_t img_cols = 0;
         if (img_w < 0) img_cols = ctx->L.text_width * (-img_w) / 100;
         else if (img_w > 0) img_cols = img_w;
@@ -1116,7 +1105,7 @@ static bool render_image_element(const RenderCtx *ctx, RenderState *rs,
         int32_t draw_row = img_screen_row;
 
         // Skip cropping in print mode - render full image
-        if (!is_print_mode()) {
+        if (!IS_PRINT_MODE()) {
             if (img_screen_row < ctx->L.top_margin) {
                 crop_top_rows = ctx->L.top_margin - img_screen_row;
                 visible_rows -= crop_top_rows;
@@ -1143,9 +1132,11 @@ static bool render_image_element(const RenderCtx *ctx, RenderState *rs,
 }
 
 //! Render HR element
-static bool render_hr_element(const RenderCtx *ctx, RenderState *rs, size_t hr_len) {
-    int32_t screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
-    bool cursor_in_hr = cursor_in_range(app.cursor, rs->pos, rs->pos + hr_len, app.hide_cursor_syntax);
+static bool render_hr_element(const RenderCtx *ctx, RenderState *rs, const Block *block) {
+    size_t hr_len = block->end - block->start;
+    if (hr_len > 0 && gap_at(&app.text, block->end - 1) == '\n') hr_len--;
+    int32_t screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
+    bool cursor_in_hr = CURSOR_IN_RANGE(app.cursor, rs->pos, rs->pos + hr_len, app.hide_cursor_syntax);
 
     // Check if HR overlaps selection
     size_t sel_s, sel_e;
@@ -1155,16 +1146,15 @@ static bool render_hr_element(const RenderCtx *ctx, RenderState *rs, size_t hr_l
     if (cursor_in_hr) {
         set_fg(get_dim());
         for (size_t i = 0; i < hr_len && rs->pos < ctx->len; i++) {
-            screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
-            track_cursor(rs->pos, rs->virtual_row, rs->col_width, ctx->L.margin,
-                        &rs->cursor_virtual_row, &rs->cursor_col);
+            screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
+            track_cursor(ctx, rs);
             char ch = gap_at(&app.text, rs->pos);
             if (ch == '\n') { rs->pos++; break; }
-            wrap_and_render_grapheme_raw(ctx, &rs->pos, &rs->col_width, &rs->virtual_row, &screen_row);
+            wrap_and_render_grapheme_raw(ctx, rs);
         }
         set_fg(get_fg());
     } else {
-        if (is_row_visible(&ctx->L, screen_row, ctx->max_row)) {
+        if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
             move_to(screen_row, ctx->L.margin + 1);
             if (in_sel) set_bg(get_select());
             set_fg(get_dim());
@@ -1185,18 +1175,21 @@ static bool render_hr_element(const RenderCtx *ctx, RenderState *rs, size_t hr_l
 
 //! Render header element with centered text and decorative underline
 //! Used when text scaling is available for beautiful typography
-static bool render_header_element(const RenderCtx *ctx, RenderState *rs,
-                                  size_t header_content, size_t header_end,
-                                  int32_t header_level, MdStyle line_style) {
-    int32_t text_scale = get_line_scale(line_style);
+static bool render_header_element(const RenderCtx *ctx, RenderState *rs, const Block *block) {
+    size_t header_content = block->data.header.content_start;
+    size_t header_end = block->end;
+    if (header_end > 0 && gap_at(&app.text, header_end - 1) == '\n') header_end--;
+    int32_t header_level = block->data.header.level;
+    MdStyle line_style = block_style_for_header_level(header_level);
+    int32_t text_scale = GET_LINE_SCALE(line_style);
     size_t header_total = header_end - rs->pos;
     if (header_end < ctx->len && gap_at(&app.text, header_end) == '\n') header_total++;
 
-    bool cursor_in_header = cursor_in_range(app.cursor, rs->pos, rs->pos + header_total, app.hide_cursor_syntax);
+    bool cursor_in_header = CURSOR_IN_RANGE(app.cursor, rs->pos, rs->pos + header_total, app.hide_cursor_syntax);
 
     if (cursor_in_header) {
         // Editing mode: show raw markdown with scaling, left-aligned
-        int32_t screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
+        int32_t screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
         MdFracScale frac = block_get_frac_scale(line_style);
         current_text_scale = frac.scale;
         current_frac_num = frac.num;
@@ -1208,7 +1201,7 @@ static bool render_header_element(const RenderCtx *ctx, RenderState *rs,
         bool selecting = has_selection();
 
         // Render the raw header syntax including # prefix
-        if (is_row_visible(&ctx->L, screen_row, ctx->max_row)) {
+        if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
             move_to(screen_row, ctx->L.margin + 1);
         }
 
@@ -1218,7 +1211,7 @@ static bool render_header_element(const RenderCtx *ctx, RenderState *rs,
         if (available_width < 1) available_width = 1;
 
         for (size_t p = rs->pos; p < header_end && p < ctx->len; ) {
-            screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
+            screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
 
             // Track cursor with scaled column position
             if (p == app.cursor) {
@@ -1229,8 +1222,8 @@ static bool render_header_element(const RenderCtx *ctx, RenderState *rs,
             if (char_col >= available_width) {
                 rs->virtual_row += text_scale;
                 char_col = 0;
-                screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
-                if (is_row_visible(&ctx->L, screen_row, ctx->max_row)) {
+                screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
+                if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
                     move_to(screen_row, ctx->L.margin + 1);
                 }
             }
@@ -1240,7 +1233,7 @@ static bool render_header_element(const RenderCtx *ctx, RenderState *rs,
 
             size_t next;
             int32_t gw = grapheme_width_next(&app.text, p, &next);
-            if (is_row_visible(&ctx->L, screen_row, ctx->max_row)) {
+            if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
                 // Raw mode - showing markdown source, skip replacements
                 output_grapheme(&app.text, &p, MD_CODE);
             } else {
@@ -1270,7 +1263,7 @@ static bool render_header_element(const RenderCtx *ctx, RenderState *rs,
     }
 
     // Beautiful mode: centered header with balanced word wrapping
-    int32_t screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
+    int32_t screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
 
     // Get selection range
     size_t sel_s, sel_e;
@@ -1402,8 +1395,8 @@ static bool render_header_element(const RenderCtx *ctx, RenderState *rs,
         if (left_padding < 0) left_padding = 0;
 
         // Render this line (only up to render_end, excluding trailing spaces)
-        screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
-        if (is_row_visible(&ctx->L, screen_row, ctx->max_row)) {
+        screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
+        if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
             current_text_scale = frac.scale;
             current_frac_num = frac.num;
             current_frac_denom = frac.denom;
@@ -1427,7 +1420,7 @@ static bool render_header_element(const RenderCtx *ctx, RenderState *rs,
                 block_apply_style(0);
 
                 int32_t underline_row = screen_row + text_scale;
-                if (is_row_visible(&ctx->L, underline_row, ctx->max_row)) {
+                if (IS_ROW_VISIBLE(&ctx->L, underline_row, ctx->max_row)) {
                     // Decorative underline is ~1/3 width of text, centered
                     int32_t underline_width = scaled_line_width / 3;
                     if (underline_width < 4) underline_width = 4;
@@ -1470,42 +1463,40 @@ static bool render_header_element(const RenderCtx *ctx, RenderState *rs,
 }
 #define CODE_TAB_WIDTH 4
 //! Render code block element
-static bool render_code_block_element(const RenderCtx *ctx, RenderState *rs,
-                                      size_t cb_lang_start, size_t cb_lang_len,
-                                      size_t cb_content_start, size_t cb_content_len,
-                                      size_t cb_total_len) {
-    int32_t screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
-    
+static bool render_code_block_element(const RenderCtx *ctx, RenderState *rs, const Block *block) {
+    size_t cb_total_len = block->end - block->start;
+    int32_t screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
+
     // Cursor inside code block - render raw dimmed
-    if (cursor_in_range(app.cursor, rs->pos, rs->pos + cb_total_len, app.hide_cursor_syntax)) {
-        render_raw_dimmed_block(ctx, &rs->pos, &rs->col_width, &rs->virtual_row, &screen_row,
-                                rs->pos + cb_total_len);
+    if (CURSOR_IN_RANGE(app.cursor, rs->pos, rs->pos + cb_total_len, app.hide_cursor_syntax)) {
+        render_raw_dimmed_block(ctx, rs, rs->pos + cb_total_len);
         rs->col_width = 0;
         return true;
     }
     
     // Extract language identifier
     char lang[32] = {0};
-    if (cb_lang_len > 0) {
-        size_t copy_len = cb_lang_len < sizeof(lang) - 1 ? cb_lang_len : sizeof(lang) - 1;
-        gap_copy_to(&app.text, cb_lang_start, copy_len, lang);
+    if (block->data.code.lang_len > 0) {
+        size_t copy_len = block->data.code.lang_len < sizeof(lang) - 1 ? block->data.code.lang_len : sizeof(lang) - 1;
+        gap_copy_to(&app.text, block->data.code.lang_start, copy_len, lang);
         lang[copy_len] = '\0';
     }
-    
+
     // Extract code content
-    char *code = malloc(cb_content_len + 1);
+    size_t content_len = block->data.code.content_len;
+    char *code = malloc(content_len + 1);
     if (!code) {
         rs->pos += cb_total_len;
         rs->col_width = 0;
         return true;
     }
 
-    gap_copy_to(&app.text, cb_content_start, cb_content_len, code);
-    code[cb_content_len] = '\0';
+    gap_copy_to(&app.text, block->data.code.content_start, content_len, code);
+    code[content_len] = '\0';
 
     // Apply syntax highlighting
     size_t hl_len = 0;
-    char *highlighted = highlight_code(app.hl_ctx, code, cb_content_len,
+    char *highlighted = highlight_code(app.hl_ctx, code, content_len,
                                        lang[0] ? lang : NULL, &hl_len);
     const char *src = highlighted ? highlighted : code;
     const char *p = src;
@@ -1514,21 +1505,20 @@ static bool render_code_block_element(const RenderCtx *ctx, RenderState *rs,
     size_t sel_s, sel_e;
     get_selection(&sel_s, &sel_e);
     bool selecting = has_selection();
-    size_t src_pos = cb_content_start;  // Track position in source document
+    size_t src_pos = block->data.code.content_start;  // Track position in source document
 
     // Track cursor position at block start
-    track_cursor(rs->pos, rs->virtual_row, rs->col_width, ctx->L.margin,
-                &rs->cursor_virtual_row, &rs->cursor_col);
+    track_cursor(ctx, rs);
 
     bool first_line = true;
     
     while (*p || first_line) {
-        screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
+        screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
         
         // Early exit if past visible area (but not in print mode)
         if (!ctx->is_print_mode && screen_row > ctx->max_row) break;
         
-        bool visible = is_row_visible(&ctx->L, screen_row, ctx->max_row);
+        bool visible = IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row);
         
         if (visible) {
             move_to(screen_row, ctx->L.margin + 1);
@@ -1647,34 +1637,34 @@ static bool render_code_block_element(const RenderCtx *ctx, RenderState *rs,
 }
 
 //! Render block math element
-static bool render_block_math_element(const RenderCtx *ctx, RenderState *rs,
-                                      size_t bm_content_start, size_t bm_content_len,
-                                      size_t bm_total_len) {
-    int32_t screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
+static bool render_block_math_element(const RenderCtx *ctx, RenderState *rs, const Block *block) {
+    size_t total_len = block->end - block->start;
+    size_t content_start = block->data.math.content_start;
+    size_t content_len = block->data.math.content_len;
+    int32_t screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
 
     // Check if math overlaps selection
     size_t sel_s, sel_e;
     get_selection(&sel_s, &sel_e);
-    bool in_sel = has_selection() && rs->pos < sel_e && rs->pos + bm_total_len > sel_s;
+    bool in_sel = has_selection() && rs->pos < sel_e && rs->pos + total_len > sel_s;
 
-    if (cursor_in_range(app.cursor, rs->pos, rs->pos + bm_total_len, app.hide_cursor_syntax)) {
-        render_raw_dimmed_block(ctx, &rs->pos, &rs->col_width, &rs->virtual_row, &screen_row,
-                                rs->pos + bm_total_len);
+    if (CURSOR_IN_RANGE(app.cursor, rs->pos, rs->pos + total_len, app.hide_cursor_syntax)) {
+        render_raw_dimmed_block(ctx, rs, rs->pos + total_len);
     } else {
-        char *latex = malloc(bm_content_len + 1);
+        char *latex = malloc(content_len + 1);
         if (latex) {
-            for (size_t i = 0; i < bm_content_len; i++) {
-                latex[i] = gap_at(&app.text, bm_content_start + i);
+            for (size_t i = 0; i < content_len; i++) {
+                latex[i] = gap_at(&app.text, content_start + i);
             }
-            latex[bm_content_len] = '\0';
+            latex[content_len] = '\0';
 
-            TexSketch *sketch = tex_render_string(latex, bm_content_len, true);
+            TexSketch *sketch = tex_render_string(latex, content_len, true);
             free(latex);
 
             if (sketch) {
                 for (int32_t r = 0; r < sketch->height; r++) {
-                    screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
-                    if (is_row_visible(&ctx->L, screen_row, ctx->max_row)) {
+                    screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
+                    if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
                         move_to(screen_row, ctx->L.margin + 1);
                         if (in_sel) set_bg(get_select());
                         set_fg(get_accent());
@@ -1691,7 +1681,7 @@ static bool render_block_math_element(const RenderCtx *ctx, RenderState *rs,
                 tex_sketch_free(sketch);
             }
         }
-        rs->pos += bm_total_len;
+        rs->pos += total_len;
     }
     rs->col_width = 0;
     return true;
@@ -1699,7 +1689,7 @@ static bool render_block_math_element(const RenderCtx *ctx, RenderState *rs,
 
 //! Render table element
 static bool render_table_element(const RenderCtx *ctx, RenderState *rs, const Block *block) {
-    int32_t screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
+    int32_t screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
     size_t total_len = block->end - block->start;
     int32_t col_count = block->data.table.col_count;
     int32_t row_count = block->data.table.row_count;
@@ -1709,9 +1699,8 @@ static bool render_table_element(const RenderCtx *ctx, RenderState *rs, const Bl
     get_selection(&sel_s, &sel_e);
     bool selecting = has_selection();
 
-    if (cursor_in_range(app.cursor, rs->pos, rs->pos + total_len, app.hide_cursor_syntax)) {
-        render_raw_dimmed_block(ctx, &rs->pos, &rs->col_width, &rs->virtual_row, &screen_row,
-                                rs->pos + total_len);
+    if (CURSOR_IN_RANGE(app.cursor, rs->pos, rs->pos + total_len, app.hide_cursor_syntax)) {
+        render_raw_dimmed_block(ctx, rs, rs->pos + total_len);
     } else {
         int32_t *col_widths = malloc((size_t)col_count * sizeof(int32_t));
         int32_t *row_heights = calloc((size_t)row_count, sizeof(int32_t));
@@ -1750,7 +1739,7 @@ static bool render_table_element(const RenderCtx *ctx, RenderState *rs, const Bl
         }
 
         // Top border
-        screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
+        screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
         render_table_hborder(&ctx->L, screen_row, ctx->max_row, col_count, col_widths, "┌", "┬", "┐");
         rs->virtual_row++;
 
@@ -1758,7 +1747,7 @@ static bool render_table_element(const RenderCtx *ctx, RenderState *rs, const Bl
         for (int32_t ri = 0; ri < row_count; ri++) {
             if (ri == 1) {
                 // Delimiter row
-                screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
+                screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
                 render_table_hborder(&ctx->L, screen_row, ctx->max_row, col_count, col_widths, "├", "┼", "┤");
                 rs->virtual_row++;
                 continue;
@@ -1781,9 +1770,9 @@ static bool render_table_element(const RenderCtx *ctx, RenderState *rs, const Bl
             }
 
             for (int32_t line = 0; line < row_heights[ri]; line++) {
-                screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
+                screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
 
-                if (is_row_visible(&ctx->L, screen_row, ctx->max_row)) {
+                if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
                     move_to(screen_row, ctx->L.margin + 1);
                     set_fg(get_border());
                     out_str("│");
@@ -1895,14 +1884,14 @@ static bool render_table_element(const RenderCtx *ctx, RenderState *rs, const Bl
 
             // Row divider
             if (ri < row_count - 1 && ri != 0) {
-                screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
+                screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
                 render_table_hborder(&ctx->L, screen_row, ctx->max_row, col_count, col_widths, "├", "┼", "┤");
                 rs->virtual_row++;
             }
         }
 
         // Bottom border
-        screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
+        screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
         render_table_hborder(&ctx->L, screen_row, ctx->max_row, col_count, col_widths, "└", "┴", "┘");
         rs->virtual_row++;
 
@@ -2266,19 +2255,18 @@ static void render_cursor_in_element(const RenderCtx *ctx, RenderState *rs, size
     set_fg(get_dim());
     size_t end_pos = rs->pos + element_len;
     while (rs->pos < end_pos && rs->pos < ctx->len) {
-        int32_t screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
-        track_cursor(rs->pos, rs->virtual_row, rs->col_width, ctx->L.margin,
-                    &rs->cursor_virtual_row, &rs->cursor_col);
-        wrap_and_render_grapheme_raw(ctx, &rs->pos, &rs->col_width, &rs->virtual_row, &screen_row);
+        track_cursor(ctx, rs);
+        wrap_and_render_grapheme_raw(ctx, rs);
     }
     set_fg(get_fg());
 }
 
 //! Render inline math element
-static bool render_inline_math(const RenderCtx *ctx, RenderState *rs,
-                               size_t math_content_start, size_t math_content_len,
-                               size_t math_total) {
-    int32_t screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
+static bool render_inline_math(const RenderCtx *ctx, RenderState *rs, const InlineRun *run) {
+    size_t math_total = run->byte_end - run->byte_start;
+    size_t content_start = run->data.math.content_start;
+    size_t content_len = run->data.math.content_len;
+    int32_t screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
 
     if (CURSOR_IN(rs->pos, rs->pos + math_total)) {
         render_cursor_in_element(ctx, rs, math_total);
@@ -2290,19 +2278,19 @@ static bool render_inline_math(const RenderCtx *ctx, RenderState *rs,
     get_selection(&sel_s, &sel_e);
     bool in_sel = has_selection() && rs->pos < sel_e && rs->pos + math_total > sel_s;
 
-    char *latex = malloc(math_content_len + 1);
+    char *latex = malloc(content_len + 1);
     if (latex) {
-        for (size_t i = 0; i < math_content_len; i++) {
-            latex[i] = gap_at(&app.text, math_content_start + i);
+        for (size_t i = 0; i < content_len; i++) {
+            latex[i] = gap_at(&app.text, content_start + i);
         }
-        latex[math_content_len] = '\0';
+        latex[content_len] = '\0';
 
-        TexSketch *sketch = tex_render_inline(latex, math_content_len, true);
+        TexSketch *sketch = tex_render_inline(latex, content_len, true);
         free(latex);
 
         if (sketch && sketch->height == 1) {
             rs->pos += math_total;
-            if (is_row_visible(&ctx->L, screen_row, ctx->max_row)) {
+            if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
                 if (in_sel) set_bg(get_select());
                 set_fg(get_accent());
                 for (int32_t c = 0; c < sketch->rows[0].count; c++) {
@@ -2321,8 +2309,8 @@ static bool render_inline_math(const RenderCtx *ctx, RenderState *rs,
             int32_t start_col = ctx->L.margin + 1 + rs->col_width;
             rs->pos += math_total;
             for (int32_t r = 0; r < sketch->height; r++) {
-                screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
-                if (is_row_visible(&ctx->L, screen_row, ctx->max_row)) {
+                screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
+                if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
                     move_to(screen_row, start_col);
                     if (in_sel) set_bg(get_select());
                     set_fg(get_accent());
@@ -2345,45 +2333,43 @@ static bool render_inline_math(const RenderCtx *ctx, RenderState *rs,
     
     // Fallback
     rs->pos += math_total;
-    if (is_row_visible(&ctx->L, screen_row, ctx->max_row)) {
+    if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
         set_fg(get_accent());
         set_italic(true);
-        for (size_t i = 0; i < math_content_len; i++) out_char(gap_at(&app.text, math_content_start + i));
+        for (size_t i = 0; i < content_len; i++) out_char(gap_at(&app.text, content_start + i));
         reset_attrs();
         set_bg(get_bg());
         set_fg(get_fg());
     }
-    rs->col_width += (int32_t)math_content_len;
+    rs->col_width += (int32_t)content_len;
     return true;
 }
 
 //! Render link element
-static bool render_link(const RenderCtx *ctx, RenderState *rs,
-                        size_t link_text_start, size_t link_text_len,
-                        size_t link_url_start, size_t link_url_len,
-                        size_t link_total) {
-    int32_t screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
+static bool render_link(const RenderCtx *ctx, RenderState *rs, const InlineRun *run) {
+    size_t link_total = run->byte_end - run->byte_start;
+    int32_t screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
 
     if (CURSOR_IN(rs->pos, rs->pos + link_total)) {
         render_cursor_in_element(ctx, rs, link_total);
         return true;
     }
-    
+
     char url[1024];
-    size_t ulen = link_url_len < sizeof(url) - 1 ? link_url_len : sizeof(url) - 1;
-    gap_copy_to(&app.text, link_url_start, ulen, url);
+    size_t ulen = run->data.link.url_len < sizeof(url) - 1 ? run->data.link.url_len : sizeof(url) - 1;
+    gap_copy_to(&app.text, run->data.link.url_start, ulen, url);
     url[ulen] = '\0';
     rs->pos += link_total;
-    
-    if (is_row_visible(&ctx->L, screen_row, ctx->max_row)) {
+
+    if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
         char link_seq[1100];
         snprintf(link_seq, sizeof(link_seq), "\x1b]8;;%s\x1b\\", url);
         out_str(link_seq);
         set_underline(UNDERLINE_STYLE_SINGLE);
         set_fg(get_accent());
-        
-        size_t link_pos = link_text_start;
-        size_t link_end = link_text_start + link_text_len;
+
+        size_t link_pos = run->data.link.text_start;
+        size_t link_end = run->data.link.text_start + run->data.link.text_len;
         int32_t link_display_width = 0;
         bool in_code = false;
         
@@ -2412,57 +2398,57 @@ static bool render_link(const RenderCtx *ctx, RenderState *rs,
         set_fg(get_fg());
         rs->col_width += link_display_width;
     } else {
-        rs->col_width += gap_display_width(&app.text, link_text_start, link_text_start + link_text_len);
+        rs->col_width += gap_display_width(&app.text, run->data.link.text_start,
+                                           run->data.link.text_start + run->data.link.text_len);
     }
     return true;
 }
 
 //! Render footnote reference
-static bool render_footnote_ref(const RenderCtx *ctx, RenderState *rs,
-                                size_t fnref_id_start, size_t fnref_id_len,
-                                size_t fnref_total) {
-    int32_t screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
+static bool render_footnote_ref(const RenderCtx *ctx, RenderState *rs, const InlineRun *run) {
+    size_t fnref_total = run->byte_end - run->byte_start;
+    size_t id_start = run->data.footnote.id_start;
+    size_t id_len = run->data.footnote.id_len;
+    int32_t screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
 
     if (CURSOR_IN(rs->pos, rs->pos + fnref_total)) {
         render_cursor_in_element(ctx, rs, fnref_total);
     } else {
         rs->pos += fnref_total;
-        if (is_row_visible(&ctx->L, screen_row, ctx->max_row)) {
+        if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
             set_fg(get_accent());
             out_str("[");
-            for (size_t i = 0; i < fnref_id_len; i++) out_char(gap_at(&app.text, fnref_id_start + i));
+            for (size_t i = 0; i < id_len; i++) out_char(gap_at(&app.text, id_start + i));
             out_str("]");
             set_fg(get_fg());
         }
-        rs->col_width += (int32_t)fnref_id_len + 2;
+        rs->col_width += (int32_t)id_len + 2;
     }
     return true;
 }
 
 //! Render heading ID (hidden unless cursor is inside)
-static bool render_heading_id(const RenderCtx *ctx, RenderState *rs,
-                              size_t hid_start, size_t hid_len, size_t hid_total) {
-    (void)hid_start; (void)hid_len;
-
-    if (CURSOR_IN(rs->pos, rs->pos + hid_total)) {
-        render_cursor_in_element(ctx, rs, hid_total);
+static bool render_heading_id(const RenderCtx *ctx, RenderState *rs, const InlineRun *run) {
+    size_t total = run->byte_end - run->byte_start;
+    if (CURSOR_IN(rs->pos, rs->pos + total)) {
+        render_cursor_in_element(ctx, rs, total);
     } else {
-        rs->pos += hid_total;
+        rs->pos += total;
     }
     return true;
 }
 
 //! Render emoji shortcode
-static bool render_emoji(const RenderCtx *ctx, RenderState *rs,
-                        const char *emoji, size_t emoji_total) {
-    int32_t screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
+static bool render_emoji(const RenderCtx *ctx, RenderState *rs, const InlineRun *run) {
+    size_t total = run->byte_end - run->byte_start;
+    int32_t screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
 
-    if (CURSOR_IN(rs->pos, rs->pos + emoji_total)) {
-        render_cursor_in_element(ctx, rs, emoji_total);
+    if (CURSOR_IN(rs->pos, rs->pos + total)) {
+        render_cursor_in_element(ctx, rs, total);
     } else {
-        rs->pos += emoji_total;
-        if (is_row_visible(&ctx->L, screen_row, ctx->max_row)) {
-            out_str(emoji);
+        rs->pos += total;
+        if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
+            out_str(run->data.emoji.emoji);
         }
         rs->col_width += 2;
     }
@@ -2479,7 +2465,7 @@ static void render_line_prefixes(const RenderCtx *ctx, RenderState *rs,
                                  const Block *block, size_t line_end,
                                  size_t *seg_end, int32_t *seg_width) {
     size_t len = ctx->len;
-    int32_t text_scale = get_line_scale(rs->line_style);
+    int32_t text_scale = GET_LINE_SCALE(rs->line_style);
 
     // Only render prefix on the first line of the block
     bool is_first_line = (rs->pos == block->start);
@@ -2495,8 +2481,7 @@ static void render_line_prefixes(const RenderCtx *ctx, RenderState *rs,
             if (task_state > 0) {
                 // Task list item
                 if (CURSOR_IN(rs->pos, content_start)) {
-                    render_raw_prefix(&rs->pos, content_start, &rs->col_width, len,
-                                     &rs->cursor_virtual_row, &rs->cursor_col, rs->virtual_row, ctx->L.margin);
+                    render_raw_prefix(ctx, rs, content_start);
                 } else {
                     rs->pos = content_start;
                     set_fg(get_dim());
@@ -2509,8 +2494,7 @@ static void render_line_prefixes(const RenderCtx *ctx, RenderState *rs,
             } else {
                 // Regular list item
                 if (CURSOR_IN(rs->pos, content_start)) {
-                    render_raw_prefix(&rs->pos, content_start, &rs->col_width, len,
-                                     &rs->cursor_virtual_row, &rs->cursor_col, rs->virtual_row, ctx->L.margin);
+                    render_raw_prefix(ctx, rs, content_start);
                 } else {
                     set_fg(get_dim());
                     for (int32_t i = 0; i < list_indent; i++) { out_char(' '); rs->col_width++; }
@@ -2553,8 +2537,7 @@ static void render_line_prefixes(const RenderCtx *ctx, RenderState *rs,
                 current_text_scale = frac.scale;
                 current_frac_num = frac.num;
                 current_frac_denom = frac.denom;
-                render_raw_prefix(&rs->pos, content_start, &rs->col_width, len,
-                                 &rs->cursor_virtual_row, &rs->cursor_col, rs->virtual_row, ctx->L.margin);
+                render_raw_prefix(ctx, rs, content_start);
             } else {
                 rs->pos = content_start;
             }
@@ -2587,8 +2570,7 @@ static void render_line_prefixes(const RenderCtx *ctx, RenderState *rs,
             if (found_level > 0) {
                 // This line has "> " prefix(es) to skip
                 if (CURSOR_IN(rs->pos, skip_pos)) {
-                    render_raw_prefix(&rs->pos, skip_pos, &rs->col_width, len,
-                                     &rs->cursor_virtual_row, &rs->cursor_col, rs->virtual_row, ctx->L.margin);
+                    render_raw_prefix(ctx, rs, skip_pos);
                 } else {
                     rs->pos = skip_pos;
                 }
@@ -2613,8 +2595,7 @@ static void render_line_prefixes(const RenderCtx *ctx, RenderState *rs,
             size_t fn_id_len = block->data.footnote.id_len;
             size_t content_start = block->data.footnote.content_start;
             if (CURSOR_IN(rs->pos, content_start)) {
-                render_raw_prefix(&rs->pos, content_start, &rs->col_width, len,
-                                 &rs->cursor_virtual_row, &rs->cursor_col, rs->virtual_row, ctx->L.margin);
+                render_raw_prefix(ctx, rs, content_start);
             } else {
                 rs->pos = content_start;
                 set_fg(get_accent());
@@ -3929,10 +3910,137 @@ void dawn_render(void) { render(); }
 // Forward declarations for block rendering
 static void render_block(const RenderCtx *ctx, RenderState *rs, const Block *block);
 
+// #region Inline Run Rendering Helpers
+
+//! Render a delimiter run (**, *, `, etc.)
+static void render_run_delim(const RenderCtx *ctx, RenderState *rs, const InlineRun *run) {
+    int32_t screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
+    bool cursor_in_delim = CURSOR_IN_RANGE(app.cursor, run->byte_start, run->byte_end, app.hide_cursor_syntax);
+    size_t dlen = run->data.delim.dlen;
+
+    if (cursor_in_delim) {
+        set_fg(get_dim());
+        for (size_t i = 0; i < dlen && rs->pos < ctx->len; i++) {
+            track_cursor(ctx, rs);
+            if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row))
+                rs->col_width += output_grapheme_advance(&app.text, &rs->pos, MD_CODE);
+            else {
+                size_t next;
+                rs->col_width += grapheme_width_next(&app.text, rs->pos, &next);
+                rs->pos = next;
+            }
+        }
+        set_fg(get_fg());
+    } else {
+        rs->pos += dlen;
+    }
+
+    // Update active_style based on delimiter
+    if (run->flags & INLINE_FLAG_IS_OPEN) {
+        rs->active_style |= run->data.delim.delim_style;
+    } else {
+        rs->active_style &= ~run->data.delim.delim_style;
+    }
+}
+
+//! Render an autolink run (<url>)
+static void render_run_autolink(const RenderCtx *ctx, RenderState *rs, const InlineRun *run) {
+    int32_t screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
+    size_t auto_total = run->byte_end - run->byte_start;
+    bool cursor_in_auto = CURSOR_IN_RANGE(app.cursor, rs->pos, rs->pos + auto_total, app.hide_cursor_syntax);
+
+    if (cursor_in_auto) {
+        set_fg(get_dim());
+        for (size_t i = 0; i < auto_total && rs->pos < ctx->len; i++) {
+            track_cursor(ctx, rs);
+            if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row))
+                rs->col_width += output_grapheme_advance(&app.text, &rs->pos, MD_CODE);
+            else {
+                size_t next;
+                rs->col_width += grapheme_width_next(&app.text, rs->pos, &next);
+                rs->pos = next;
+            }
+        }
+        set_fg(get_fg());
+    } else {
+        set_fg(get_accent());
+        set_underline(UNDERLINE_STYLE_SINGLE);
+        rs->pos++;  // skip <
+        size_t url_end = rs->pos + run->data.autolink.url_len;
+        while (rs->pos < url_end && rs->pos < ctx->len) {
+            if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row))
+                rs->col_width += output_grapheme_advance(&app.text, &rs->pos, MD_CODE);
+            else {
+                size_t next;
+                rs->col_width += grapheme_width_next(&app.text, rs->pos, &next);
+                rs->pos = next;
+            }
+        }
+        rs->pos++;  // skip >
+        set_underline(0);
+        set_fg(get_fg());
+    }
+}
+
+//! Render an HTML entity run (&amp; etc.)
+static void render_run_entity(const RenderCtx *ctx, RenderState *rs, const InlineRun *run) {
+    int32_t screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
+    size_t entity_total = run->byte_end - run->byte_start;
+    bool cursor_in_entity = CURSOR_IN_RANGE(app.cursor, rs->pos, rs->pos + entity_total, app.hide_cursor_syntax);
+
+    if (cursor_in_entity) {
+        set_fg(get_dim());
+        for (size_t i = 0; i < entity_total && rs->pos < ctx->len; i++) {
+            track_cursor(ctx, rs);
+            if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row))
+                rs->col_width += output_grapheme_advance(&app.text, &rs->pos, MD_CODE);
+            else {
+                size_t next;
+                rs->col_width += grapheme_width_next(&app.text, rs->pos, &next);
+                rs->pos = next;
+            }
+        }
+        set_fg(get_fg());
+    } else {
+        if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
+            out_str_n(run->data.entity.utf8, run->data.entity.utf8_len);
+            rs->col_width += utf8_display_width(run->data.entity.utf8, run->data.entity.utf8_len);
+        }
+        rs->pos += entity_total;
+    }
+}
+
+//! Render an escape sequence run (\x)
+//! Returns true if the escaped char should be skipped (hard line break)
+static bool render_run_escape(const RenderCtx *ctx, RenderState *rs, const InlineRun *run) {
+    int32_t screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
+    bool cursor_on_backslash = CURSOR_IN_RANGE(app.cursor, rs->pos, rs->pos + 1, app.hide_cursor_syntax);
+
+    if (cursor_on_backslash) {
+        set_fg(get_dim());
+        if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row))
+            rs->col_width += output_grapheme_advance(&app.text, &rs->pos, MD_CODE);
+        else {
+            size_t next;
+            rs->col_width += grapheme_width_next(&app.text, rs->pos, &next);
+            rs->pos = next;
+        }
+        set_fg(get_fg());
+    } else {
+        rs->pos++;  // Skip backslash
+        if (run->data.escape.escaped_char == '\n') {
+            return true;  // Hard line break - skip
+        }
+    }
+    return false;
+}
+
+// #endregion
+
 static void render_writing(void) {
     if (app.plain_mode) { render_writing_plain(); return; }
 
-    bool print_mode = is_print_mode();
+    bool print_mode = IS_PRINT_MODE();
 
     Layout L = calc_layout();
 
@@ -4049,7 +4157,7 @@ static void render_writing(void) {
             Block *block = &bc->blocks[bi];
 
             // Use running_vrow instead of block->vrow_start to handle expansion
-            int32_t block_screen_start = vrow_to_screen(&L, running_vrow, scroll_y);
+            int32_t block_screen_start = VROW_TO_SCREEN(&L, running_vrow, scroll_y);
 
             // In print mode, don't break early - render all blocks
             if (!print_mode && block_screen_start > max_row) break;
@@ -4071,7 +4179,7 @@ static void render_writing(void) {
                     }
                 }
 
-                int32_t screen_row = vrow_to_screen(&L, running_vrow, scroll_y);
+                int32_t screen_row = VROW_TO_SCREEN(&L, running_vrow, scroll_y);
                 if (screen_row >= L.top_margin && screen_row <= max_row) {
                     move_to(screen_row, L.margin + 1);
                     clear_line();
@@ -4143,7 +4251,7 @@ static void render_writing(void) {
     }
 
     image_frame_end();
-    int32_t cursor_screen_row = vrow_to_screen(&L, rs.cursor_virtual_row, app.scroll_y);
+    int32_t cursor_screen_row = VROW_TO_SCREEN(&L, rs.cursor_virtual_row, app.scroll_y);
     if (cursor_screen_row < L.top_margin) cursor_screen_row = L.top_margin;
     if (cursor_screen_row > max_row) cursor_screen_row = max_row;
     if (rs.cursor_col < L.margin + 1) rs.cursor_col = L.margin + 1;
@@ -4153,49 +4261,30 @@ static void render_writing(void) {
 
 //! Render a single block - dispatches to type-specific renderer
 static void render_block(const RenderCtx *ctx, RenderState *rs, const Block *block) {
-    bool cursor_in_block = (app.cursor >= block->start && app.cursor < block->end);
-
     switch (block->type) {
         case BLOCK_IMAGE:
-            render_image_element(ctx, rs,
-                block->data.image.alt_start, block->data.image.alt_len,
-                block->data.image.path_start, block->data.image.path_len,
-                block->data.image.width, block->data.image.height,
-                block->end - block->start);
+            render_image_element(ctx, rs, block);
             break;
 
-        case BLOCK_HR: {
-            size_t hr_len = block->end - block->start;
-            if (hr_len > 0 && gap_at(&app.text, block->end - 1) == '\n') hr_len--;
-            render_hr_element(ctx, rs, hr_len);
+        case BLOCK_HR:
+            render_hr_element(ctx, rs, block);
             break;
-        }
 
-        case BLOCK_HEADER: {
+        case BLOCK_HEADER:
             if (HAS_CAP(DAWN_CAP_TEXT_SIZING)) {
-                size_t header_end = block->end;
-                if (header_end > 0 && gap_at(&app.text, header_end - 1) == '\n') header_end--;
-                MdStyle header_style = block_style_for_header_level(block->data.header.level);
-                render_header_element(ctx, rs, block->data.header.content_start, header_end,
-                                     block->data.header.level, header_style);
+                render_header_element(ctx, rs, block);
             } else {
                 // Fall through to paragraph-style rendering for non-scalable platforms
                 goto render_as_paragraph;
             }
             break;
-        }
 
         case BLOCK_CODE:
-            render_code_block_element(ctx, rs,
-                block->data.code.lang_start, block->data.code.lang_len,
-                block->data.code.content_start, block->data.code.content_len,
-                block->end - block->start);
+            render_code_block_element(ctx, rs, block);
             break;
 
         case BLOCK_MATH:
-            render_block_math_element(ctx, rs,
-                block->data.math.content_start, block->data.math.content_len,
-                block->end - block->start);
+            render_block_math_element(ctx, rs, block);
             break;
 
         case BLOCK_TABLE:
@@ -4223,16 +4312,15 @@ static void render_block(const RenderCtx *ctx, RenderState *rs, const Block *blo
             rs->current_run_idx = 0;
 
             while (rs->pos < block->end && rs->pos < len) {
-                int32_t screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
+                int32_t screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
                 char c = gap_at(&app.text, rs->pos);
 
-                track_cursor(rs->pos, rs->virtual_row, rs->col_width, ctx->L.margin,
-                            &rs->cursor_virtual_row, &rs->cursor_col);
+                track_cursor(ctx, rs);
 
                 // Handle newline
                 if (c == '\n') {
                     rs->pos++;
-                    int32_t newline_scale = get_line_scale(rs->line_style);
+                    int32_t newline_scale = GET_LINE_SCALE(rs->line_style);
                     rs->virtual_row += newline_scale;
                     rs->col_width = 0;
                     rs->line_style = 0;
@@ -4262,171 +4350,67 @@ static void render_block(const RenderCtx *ctx, RenderState *rs, const Block *blo
                 }
 
                 // Calculate wrap segment
-                int32_t text_scale = get_line_scale(rs->line_style);
+                int32_t text_scale = GET_LINE_SCALE(rs->line_style);
                 int32_t seg_width;
                 int32_t available_width = (ctx->L.text_width - rs->col_width) / text_scale;
                 if (available_width < 1) available_width = 1;
                 size_t seg_end = gap_find_wrap_point(&app.text, rs->pos, line_end, available_width, &seg_width);
 
                 // Render line prefixes (blockquote bars, list bullets, etc.)
-                if (is_row_visible(&ctx->L, screen_row, ctx->max_row)) {
+                if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
                     if (rs->col_width == 0) move_to(screen_row, ctx->L.margin + 1);
                     render_line_prefixes(ctx, rs, block, line_end, &seg_end, &seg_width);
                 }
 
                 // Render segment content with inline markdown
                 while (rs->pos < seg_end && rs->pos < len) {
-                    screen_row = vrow_to_screen(&ctx->L, rs->virtual_row, app.scroll_y);
+                    screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
                     if (screen_row > ctx->max_row) { rs->pos = seg_end; break; }
 
-                    track_cursor(rs->pos, rs->virtual_row, rs->col_width, ctx->L.margin,
-                                &rs->cursor_virtual_row, &rs->cursor_col);
+                    track_cursor(ctx, rs);
 
                     bool in_sel = has_selection() && rs->pos >= sel_s && rs->pos < sel_e;
 
                     // Run-based rendering: handle special runs at their start position
                     const InlineRun *run = get_current_run(rs);
-                    if (run && at_run_start(rs, run)) {
+                    if (run && AT_RUN_START(rs, run)) {
                         switch (run->type) {
-                            case RUN_DELIM: {
-                                // Render delimiter (hidden or shown based on cursor)
-                                bool cursor_in_delim = cursor_in_range(app.cursor, run->byte_start,
-                                                                       run->byte_end, app.hide_cursor_syntax);
-                                size_t dlen = run->data.delim.dlen;
-                                if (cursor_in_delim) {
-                                    // Show delimiter dimmed when cursor is inside (raw mode)
-                                    set_fg(get_dim());
-                                    for (size_t i = 0; i < dlen && rs->pos < len; i++) {
-                                        track_cursor(rs->pos, rs->virtual_row, rs->col_width, ctx->L.margin,
-                                                    &rs->cursor_virtual_row, &rs->cursor_col);
-                                        if (is_row_visible(&ctx->L, screen_row, ctx->max_row))
-                                            rs->col_width += output_grapheme_advance(&app.text, &rs->pos, MD_CODE);
-                                        else { size_t next; rs->col_width += grapheme_width_next(&app.text, rs->pos, &next); rs->pos = next; }
-                                    }
-                                    set_fg(get_fg());
-                                } else {
-                                    // Hide delimiter - just skip it
-                                    rs->pos += dlen;
-                                }
-                                // Update active_style based on delimiter
-                                if (run->flags & INLINE_FLAG_IS_OPEN) {
-                                    rs->active_style |= run->data.delim.delim_style;
-                                } else {
-                                    rs->active_style &= ~run->data.delim.delim_style;
-                                }
+                            case RUN_DELIM:
+                                render_run_delim(ctx, rs, run);
                                 continue;
-                            }
 
                             case RUN_INLINE_MATH:
-                                render_inline_math(ctx, rs, run->data.math.content_start,
-                                                   run->data.math.content_len,
-                                                   run->byte_end - run->byte_start);
+                                render_inline_math(ctx, rs, run);
                                 continue;
 
                             case RUN_LINK:
-                                render_link(ctx, rs, run->data.link.text_start,
-                                            run->data.link.text_len,
-                                            run->data.link.url_start,
-                                            run->data.link.url_len,
-                                            run->byte_end - run->byte_start);
+                                render_link(ctx, rs, run);
                                 continue;
 
                             case RUN_FOOTNOTE_REF:
-                                render_footnote_ref(ctx, rs, run->data.footnote.id_start,
-                                                    run->data.footnote.id_len,
-                                                    run->byte_end - run->byte_start);
+                                render_footnote_ref(ctx, rs, run);
                                 continue;
 
                             case RUN_EMOJI:
-                                render_emoji(ctx, rs, run->data.emoji.emoji,
-                                             run->byte_end - run->byte_start);
+                                render_emoji(ctx, rs, run);
                                 continue;
 
-                            case RUN_AUTOLINK: {
-                                size_t auto_total = run->byte_end - run->byte_start;
-                                bool cursor_in_auto = cursor_in_range(app.cursor, rs->pos,
-                                                                      rs->pos + auto_total, app.hide_cursor_syntax);
-                                if (cursor_in_auto) {
-                                    // Raw mode - showing source
-                                    set_fg(get_dim());
-                                    for (size_t i = 0; i < auto_total && rs->pos < len; i++) {
-                                        track_cursor(rs->pos, rs->virtual_row, rs->col_width, ctx->L.margin,
-                                                    &rs->cursor_virtual_row, &rs->cursor_col);
-                                        if (is_row_visible(&ctx->L, screen_row, ctx->max_row))
-                                            rs->col_width += output_grapheme_advance(&app.text, &rs->pos, MD_CODE);
-                                        else { size_t next; rs->col_width += grapheme_width_next(&app.text, rs->pos, &next); rs->pos = next; }
-                                    }
-                                    set_fg(get_fg());
-                                } else {
-                                    set_fg(get_accent());
-                                    set_underline(UNDERLINE_STYLE_SINGLE);
-                                    rs->pos++;  // skip <
-                                    size_t url_end = rs->pos + run->data.autolink.url_len;
-                                    while (rs->pos < url_end && rs->pos < len) {
-                                        // URL content - skip replacements (don't want -- becoming en-dash in URLs)
-                                        if (is_row_visible(&ctx->L, screen_row, ctx->max_row))
-                                            rs->col_width += output_grapheme_advance(&app.text, &rs->pos, MD_CODE);
-                                        else { size_t next; rs->col_width += grapheme_width_next(&app.text, rs->pos, &next); rs->pos = next; }
-                                    }
-                                    rs->pos++;  // skip >
-                                    set_underline(0);
-                                    set_fg(get_fg());
-                                }
+                            case RUN_AUTOLINK:
+                                render_run_autolink(ctx, rs, run);
                                 continue;
-                            }
 
-                            case RUN_ENTITY: {
-                                size_t entity_total = run->byte_end - run->byte_start;
-                                bool cursor_in_entity = cursor_in_range(app.cursor, rs->pos,
-                                                                        rs->pos + entity_total, app.hide_cursor_syntax);
-                                if (cursor_in_entity) {
-                                    // Raw mode - showing source
-                                    set_fg(get_dim());
-                                    for (size_t i = 0; i < entity_total && rs->pos < len; i++) {
-                                        track_cursor(rs->pos, rs->virtual_row, rs->col_width, ctx->L.margin,
-                                                    &rs->cursor_virtual_row, &rs->cursor_col);
-                                        if (is_row_visible(&ctx->L, screen_row, ctx->max_row))
-                                            rs->col_width += output_grapheme_advance(&app.text, &rs->pos, MD_CODE);
-                                        else { size_t next; rs->col_width += grapheme_width_next(&app.text, rs->pos, &next); rs->pos = next; }
-                                    }
-                                    set_fg(get_fg());
-                                } else {
-                                    if (is_row_visible(&ctx->L, screen_row, ctx->max_row)) {
-                                        out_str_n(run->data.entity.utf8, run->data.entity.utf8_len);
-                                        rs->col_width += utf8_display_width(run->data.entity.utf8,
-                                                                            run->data.entity.utf8_len);
-                                    }
-                                    rs->pos += entity_total;
-                                }
+                            case RUN_ENTITY:
+                                render_run_entity(ctx, rs, run);
                                 continue;
-                            }
 
-                            case RUN_ESCAPE: {
-                                bool cursor_on_backslash = cursor_in_range(app.cursor, rs->pos,
-                                                                           rs->pos + 1, app.hide_cursor_syntax);
-                                if (cursor_on_backslash) {
-                                    // Raw mode - showing backslash
-                                    set_fg(get_dim());
-                                    if (is_row_visible(&ctx->L, screen_row, ctx->max_row))
-                                        rs->col_width += output_grapheme_advance(&app.text, &rs->pos, MD_CODE);
-                                    else { size_t next; rs->col_width += grapheme_width_next(&app.text, rs->pos, &next); rs->pos = next; }
-                                    set_fg(get_fg());
-                                } else {
-                                    rs->pos++;  // Skip backslash
-                                    if (run->data.escape.escaped_char == '\n') {
-                                        continue;  // Hard line break
-                                    }
-                                }
-                                // The escaped character will render on next iteration as plain text
+                            case RUN_ESCAPE:
+                                if (render_run_escape(ctx, rs, run)) continue;
                                 continue;
-                            }
 
                             case RUN_HEADING_ID:
                                 // Only treat as heading ID if we're on a heading line
                                 if (rs->line_style & (MD_H1 | MD_H2 | MD_H3 | MD_H4 | MD_H5 | MD_H6)) {
-                                    render_heading_id(ctx, rs, run->data.heading_id.id_start,
-                                                      run->data.heading_id.id_len,
-                                                      run->byte_end - run->byte_start);
+                                    render_heading_id(ctx, rs, run);
                                     continue;
                                 }
                                 // Fall through to text rendering if not on heading line
@@ -4458,7 +4442,7 @@ static void render_block(const RenderCtx *ctx, RenderState *rs, const Block *blo
                     }
                     // If MD_MARK or MD_CODE, background was already set by block_apply_style
 
-                    if (is_row_visible(&ctx->L, screen_row, ctx->max_row)) {
+                    if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
                         // Use active_style to skip replacements inside inline code
                         rs->col_width += output_grapheme_advance(&app.text, &rs->pos, rs->active_style);
                     } else {
@@ -4471,7 +4455,7 @@ static void render_block(const RenderCtx *ctx, RenderState *rs, const Block *blo
                 // End of segment - wrap to next line if needed
                 if (rs->pos >= seg_end && rs->pos < line_end) {
                     // In print mode, reset background before line wrap to prevent code bg overflow
-                    if (ctx->is_print_mode && is_row_visible(&ctx->L, screen_row, ctx->max_row)) {
+                    if (ctx->is_print_mode && IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
                         reset_attrs();
                         set_bg(get_bg());
                     }
@@ -4483,6 +4467,4 @@ static void render_block(const RenderCtx *ctx, RenderState *rs, const Block *blo
             break;
         }
     }
-
-    (void)cursor_in_block;
 }

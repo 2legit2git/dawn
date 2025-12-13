@@ -388,7 +388,15 @@ static int32_t parse_int_from_gap(const GapBuffer *gb, size_t pos, int32_t *valu
     while (pos + chars < len) {
         char c = gap_at(gb, pos + chars);
         if (c >= '0' && c <= '9') {
-            v = v * 10 + (c - '0');
+            int32_t digit = c - '0';
+            if (v > (INT32_MAX - digit) / 10) {
+                v = INT32_MAX;
+                chars++;
+                while (pos + chars < len && gap_at(gb, pos + chars) >= '0' && gap_at(gb, pos + chars) <= '9')
+                    chars++;
+                break;
+            }
+            v = v * 10 + digit;
             chars++;
         } else {
             break;

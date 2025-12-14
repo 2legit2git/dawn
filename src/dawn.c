@@ -1184,6 +1184,7 @@ static bool render_header_element(const RenderCtx *ctx, RenderState *rs, const B
     int32_t text_scale = GET_LINE_SCALE(line_style);
     size_t header_total = header_end - rs->pos;
     if (header_end < ctx->len && gap_at(&app.text, header_end) == '\n') header_total++;
+    else if (header_end >= ctx->len) header_total++;  // Include cursor at end of file
 
     bool cursor_in_header = CURSOR_IN_RANGE(app.cursor, rs->pos, rs->pos + header_total, app.hide_cursor_syntax);
 
@@ -1248,6 +1249,11 @@ static bool render_header_element(const RenderCtx *ctx, RenderState *rs, const B
                 rs->cursor_virtual_row = rs->virtual_row;
                 rs->cursor_col = ctx->L.margin + 1 + (char_col * text_scale);
             }
+        }
+        // Track cursor at end of file (header with no trailing newline)
+        if (header_end == app.cursor && header_end >= ctx->len) {
+            rs->cursor_virtual_row = rs->virtual_row;
+            rs->cursor_col = ctx->L.margin + 1 + (char_col * text_scale);
         }
         rs->pos = header_end;
         if (rs->pos < ctx->len && gap_at(&app.text, rs->pos) == '\n') rs->pos++;
@@ -4211,9 +4217,15 @@ static void render_writing(void) {
 
     // Handle cursor at end of document
     if (!print_mode && app.cursor >= len) {
-        // Use running_vrow which reflects actual rendered rows
-        rs.cursor_virtual_row = running_vrow;
-        rs.cursor_col = L.margin + 1 + rs.col_width;
+        Block *last = (bc && bc->valid && bc->count > 0) ? &bc->blocks[bc->count - 1] : NULL;
+        // Skip override only for headers at EOF with NO trailing newline
+        // (header renderer tracks cursor at content end, but not after newline)
+        bool has_newline = last && last->end > 0 && gap_at(&app.text, last->end - 1) == '\n';
+        bool skip = last && app.cursor == last->end && last->type == BLOCK_HEADER && !has_newline;
+        if (!skip) {
+            rs.cursor_virtual_row = running_vrow;
+            rs.cursor_col = L.margin + 1 + rs.col_width;
+        }
     }
 
     // Re-adjust scroll based on actual rendered cursor position (skip in print mode)

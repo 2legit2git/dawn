@@ -121,6 +121,7 @@ typedef struct DawnBackend {
     void (*clear_range)(int32_t count);  //!< Erase N chars at cursor using current bg
     void (*write_str)(const char *s, size_t len);
     void (*write_char)(char c);
+    void (*repeat_char)(char c, int32_t n);
     void (*write_scaled)(const char *s, size_t len, int32_t scale);
     void (*write_scaled_frac)(const char *s, size_t len, int32_t scale, int32_t num, int32_t denom);
     void (*flush)(void);

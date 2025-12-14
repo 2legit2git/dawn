@@ -873,6 +873,24 @@ static void posix_write_char(char c) {
     }
 }
 
+static void posix_repeat_char(char c, int32_t n) {
+    if (n <= 0) return;
+    buf_append_char(c);
+    if (n > 1) {
+        // REP sequence: CSI n b - repeat previous char n times
+        char seq[16];
+        seq[0] = '\x1b';
+        seq[1] = '[';
+        int32_t pos = 2;
+        pos += format_num(seq + pos, n - 1);
+        seq[pos++] = 'b';
+        buf_append(seq, (size_t)pos);
+    }
+    if (posix_state.mode == DAWN_MODE_PRINT) {
+        posix_state.print_col += n;
+    }
+}
+
 static void posix_write_scaled(const char *str, size_t len, int32_t scale) {
     if (scale <= 1 || !(posix_state.capabilities & DAWN_CAP_TEXT_SIZING)) {
         buf_append(str, len);
@@ -2133,6 +2151,7 @@ const DawnBackend dawn_backend_posix = {
     .clear_range = posix_clear_range,
     .write_str = posix_write_str,
     .write_char = posix_write_char,
+    .repeat_char = posix_repeat_char,
     .write_scaled = posix_write_scaled,
     .write_scaled_frac = posix_write_scaled_frac,
     .flush = posix_flush,

@@ -262,22 +262,12 @@ static inline bool is_in_list_item(size_t pos, int32_t *out_indent, size_t *out_
                                    int32_t *out_list_type, int32_t *out_task_state) {
     Block *b = get_block_at(pos);
     if (!b || b->type != BLOCK_LIST_ITEM) return false;
+    if (pos >= b->end) return false;  // Position is past this block (trailing blank lines)
     if (out_indent) *out_indent = b->data.list.indent;
     if (out_content_start) *out_content_start = b->data.list.content_start;
     if (out_list_type) *out_list_type = b->data.list.list_type;
     if (out_task_state) *out_task_state = b->data.list.task_state;
     return true;
-}
-
-//! Check if position is in a blockquote
-//! @param pos byte position to check
-//! @param out_content_start output: byte position of quote content
-//! @return quote nesting level (0 if not in quote)
-static inline int32_t get_blockquote_level_at(size_t pos, size_t *out_content_start) {
-    Block *b = get_block_at(pos);
-    if (!b || b->type != BLOCK_BLOCKQUOTE) return 0;
-    if (out_content_start) *out_content_start = b->data.quote.content_start;
-    return b->data.quote.level;
 }
 
 //! Check if position is in an image block
@@ -2538,7 +2528,14 @@ static void render_line_prefixes(const RenderCtx *ctx, RenderState *rs,
             }
 
             size_t content_start = block->data.header.content_start;
-            if (CURSOR_IN(rs->pos, content_start)) {
+            // Check if cursor is anywhere in the header block (same logic as render_header_element)
+            size_t header_end = block->end;
+            if (header_end > 0 && header_end <= ctx->len && gap_at(&app.text, header_end - 1) == '\n') header_end--;
+            size_t header_check_end = header_end;
+            if (header_end < ctx->len && gap_at(&app.text, header_end) == '\n') header_check_end++;
+            else if (header_end >= ctx->len) header_check_end++;
+
+            if (CURSOR_IN_RANGE(app.cursor, block->start, header_check_end, app.hide_cursor_syntax)) {
                 MdFracScale frac = block_get_frac_scale(rs->line_style);
                 current_text_scale = frac.scale;
                 current_frac_num = frac.num;
@@ -2561,7 +2558,7 @@ static void render_line_prefixes(const RenderCtx *ctx, RenderState *rs,
             // Check how many levels of "> " are at current position
             size_t skip_pos = rs->pos;
             int32_t found_level = 0;
-            while (skip_pos < len && found_level < quote_level) {
+            while (skip_pos < len) {
                 if (gap_at(&app.text, skip_pos) == '>') {
                     skip_pos++;
                     if (skip_pos < len && gap_at(&app.text, skip_pos) == ' ') {
@@ -2572,6 +2569,9 @@ static void render_line_prefixes(const RenderCtx *ctx, RenderState *rs,
                     break;
                 }
             }
+
+            // Use found_level for this line, fall back to block's level for wrapped lines
+            int32_t render_level = found_level > 0 ? found_level : quote_level;
 
             if (found_level > 0) {
                 // This line has "> " prefix(es) to skip
@@ -2584,7 +2584,7 @@ static void render_line_prefixes(const RenderCtx *ctx, RenderState *rs,
 
             // Always show quote bars
             set_fg(get_accent());
-            for (int32_t i = 0; i < quote_level; i++) {
+            for (int32_t i = 0; i < render_level; i++) {
                 out_str("┃ ");
                 rs->col_width += 2;
             }
@@ -3209,9 +3209,9 @@ static void handle_writing(int32_t key) {
                 break;
             }
 
-            // Check for blockquote using block query
+            // Check for blockquote - use md_check_blockquote directly to get content_start for THIS line
             size_t quote_content;
-            int32_t quote_level = get_blockquote_level_at(line_start, &quote_content);
+            int32_t quote_level = md_check_blockquote(&app.text, line_start, &quote_content);
             if (quote_level > 0) {
                 if (is_item_content_empty(&app.text, app.cursor, quote_content)) {
                     handle_empty_list_item(&app.text, &app.cursor, line_start);
@@ -4188,7 +4188,17 @@ static void render_writing(void) {
                 int32_t screen_row = VROW_TO_SCREEN(&L, running_vrow, scroll_y);
                 if (screen_row >= L.top_margin && screen_row <= max_row) {
                     move_to(screen_row, L.margin + 1);
-                    clear_line();
+                    // Check if this blank line is in selection - show selection background
+                    size_t sel_s, sel_e;
+                    get_selection(&sel_s, &sel_e);
+                    bool in_sel = has_selection() && blank_pos >= sel_s && blank_pos < sel_e;
+                    if (in_sel) {
+                        set_bg(get_select());
+                        out_spaces(L.text_width);
+                        set_bg(get_bg());
+                    } else {
+                        clear_line();
+                    }
                 }
 
                 // Move to next blank line position
@@ -4215,13 +4225,53 @@ static void render_writing(void) {
         }
     }
 
+    // Handle trailing blank lines (newlines after last block or entire document if no blocks)
+    if (!print_mode) {
+        size_t trailing_start = (bc && bc->valid && bc->count > 0) ? bc->blocks[bc->count - 1].end : 0;
+
+        // Track cursor if it's in the trailing blank region (not at EOF)
+        if (app.cursor >= trailing_start && app.cursor < len) {
+            int32_t newlines_before_cursor = 0;
+            for (size_t p = trailing_start; p < app.cursor; p++) {
+                if (gap_at(&app.text, p) == '\n') newlines_before_cursor++;
+            }
+            rs.cursor_virtual_row = running_vrow + newlines_before_cursor;
+            rs.cursor_col = L.margin + 1;
+        }
+
+        // Render trailing blank lines and increment running_vrow
+        size_t sel_s, sel_e;
+        get_selection(&sel_s, &sel_e);
+        bool selecting = has_selection();
+        for (size_t p = trailing_start; p < len; p++) {
+            if (gap_at(&app.text, p) == '\n') {
+                int32_t screen_row = VROW_TO_SCREEN(&L, running_vrow, scroll_y);
+                if (screen_row >= L.top_margin && screen_row <= max_row) {
+                    move_to(screen_row, L.margin + 1);
+                    // Check if this blank line is in selection - show selection background
+                    bool in_sel = selecting && p >= sel_s && p < sel_e;
+                    if (in_sel) {
+                        set_bg(get_select());
+                        out_spaces(L.text_width);
+                        set_bg(get_bg());
+                    } else {
+                        clear_line();
+                    }
+                }
+                running_vrow++;
+            }
+        }
+    }
+
     // Handle cursor at end of document
     if (!print_mode && app.cursor >= len) {
         Block *last = (bc && bc->valid && bc->count > 0) ? &bc->blocks[bc->count - 1] : NULL;
-        // Skip override only for headers at EOF with NO trailing newline
+        // Skip override only for headers at EOF with NO trailing newline when using scaled header renderer
         // (header renderer tracks cursor at content end, but not after newline)
+        // In non-scaled mode, paragraph rendering is used which doesn't track cursor in prefix
         bool has_newline = last && last->end > 0 && gap_at(&app.text, last->end - 1) == '\n';
-        bool skip = last && app.cursor == last->end && last->type == BLOCK_HEADER && !has_newline;
+        bool skip = last && app.cursor == last->end && last->type == BLOCK_HEADER && !has_newline
+                    && HAS_CAP(DAWN_CAP_TEXT_SIZING);
         if (!skip) {
             rs.cursor_virtual_row = running_vrow;
             rs.cursor_col = L.margin + 1 + rs.col_width;

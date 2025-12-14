@@ -897,6 +897,24 @@ static void web_write_char(char c) {
     web_state.cursor_col++;
 }
 
+static void web_repeat_char(char c, int32_t n) {
+    if (n <= 0) return;
+    if (c == ' ') {
+        js_clear_rect(web_state.cursor_col, web_state.cursor_row, n, 1,
+                      web_state.bg_r, web_state.bg_g, web_state.bg_b);
+    } else {
+        for (int32_t i = 0; i < n; i++) {
+            char buf[2] = {c, '\0'};
+            js_draw_text(web_state.cursor_col + i, web_state.cursor_row, buf, 1,
+                         web_state.fg_r, web_state.fg_g, web_state.fg_b,
+                         web_state.bg_r, web_state.bg_g, web_state.bg_b,
+                         web_state.bold, web_state.italic, web_state.dim,
+                         web_state.underline, web_state.strikethrough);
+        }
+    }
+    web_state.cursor_col += n;
+}
+
 static void web_write_scaled(const char *str, size_t len, int32_t scale) {
     if (scale <= 1) {
         web_write_str(str, len);
@@ -1367,6 +1385,7 @@ const DawnBackend dawn_backend_web = {
     .clear_range = web_clear_range,
     .write_str = web_write_str,
     .write_char = web_write_char,
+    .repeat_char = web_repeat_char,
     .write_scaled = web_write_scaled,
     .write_scaled_frac = web_write_scaled_frac,
     .flush = web_flush,

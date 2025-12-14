@@ -55,9 +55,7 @@ void out_char(char c) {
 }
 
 void out_spaces(int32_t n) {
-    for (int32_t i = 0; i < n; i++) {
-        DAWN_BACKEND(app)->write_char(' ');
-    }
+    DAWN_BACKEND(app)->repeat_char(' ', n);
 }
 
 void out_int(int32_t value) {

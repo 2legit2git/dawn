@@ -1634,54 +1634,53 @@ static bool render_code_block_element(const RenderCtx *ctx, RenderState *rs, con
 
 //! Render block math element
 static bool render_block_math_element(const RenderCtx *ctx, RenderState *rs, const Block *block) {
-    size_t total_len = block->end - block->start;
-    size_t content_start = block->data.math.content_start;
-    size_t content_len = block->data.math.content_len;
-    int32_t screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
+      size_t total_len = block->end - block->start;
 
-    // Check if math overlaps selection
-    size_t sel_s, sel_e;
-    get_selection(&sel_s, &sel_e);
-    bool in_sel = has_selection() && rs->pos < sel_e && rs->pos + total_len > sel_s;
+      if (CURSOR_IN_RANGE(app.cursor, rs->pos, rs->pos + total_len, app.hide_cursor_syntax)) {
+          render_raw_dimmed_block(ctx, rs, rs->pos + total_len);
+      } else {
+          // Check if math overlaps selection
+          size_t sel_s, sel_e;
+          get_selection(&sel_s, &sel_e);
+          bool in_sel = has_selection() && rs->pos < sel_e && rs->pos + total_len > sel_s;
 
-    if (CURSOR_IN_RANGE(app.cursor, rs->pos, rs->pos + total_len, app.hide_cursor_syntax)) {
-        render_raw_dimmed_block(ctx, rs, rs->pos + total_len);
-    } else {
-        char *latex = malloc(content_len + 1);
-        if (latex) {
-            for (size_t i = 0; i < content_len; i++) {
-                latex[i] = gap_at(&app.text, content_start + i);
-            }
-            latex[content_len] = '\0';
+          // Use cached sketch if available, otherwise render and cache
+          TexSketch *sketch = (TexSketch *)block->data.math.tex_sketch;
+          if (!sketch) {
+              size_t content_len = block->data.math.content_len;
+              char *latex = malloc(content_len + 1);
+              if (latex) {
+                  gap_copy_to(&app.text, block->data.math.content_start, content_len, latex);
+                  latex[content_len] = '\0';
+                  sketch = tex_render_string(latex, content_len, true);
+                  free(latex);
+                  ((Block *)block)->data.math.tex_sketch = sketch;
+              }
+          }
 
-            TexSketch *sketch = tex_render_string(latex, content_len, true);
-            free(latex);
-
-            if (sketch) {
-                for (int32_t r = 0; r < sketch->height; r++) {
-                    screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
-                    if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
-                        move_to(screen_row, ctx->L.margin + 1);
-                        if (in_sel) set_bg(get_select());
-                        set_fg(get_accent());
-                        for (int32_t c = 0; c < sketch->rows[r].count; c++) {
-                            if (sketch->rows[r].cells[c].data) {
-                                out_str(sketch->rows[r].cells[c].data);
-                            }
-                        }
-                        set_fg(get_fg());
-                        if (in_sel) set_bg(get_bg());
-                    }
-                    rs->virtual_row++;
-                }
-                tex_sketch_free(sketch);
-            }
-        }
-        rs->pos += total_len;
-    }
-    rs->col_width = 0;
-    return true;
-}
+          if (sketch) {
+              for (int32_t r = 0; r < sketch->height; r++) {
+                  int32_t screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
+                  if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
+                      move_to(screen_row, ctx->L.margin + 1);
+                      if (in_sel) set_bg(get_select());
+                      set_fg(get_accent());
+                      for (int32_t c = 0; c < sketch->rows[r].count; c++) {
+                          if (sketch->rows[r].cells[c].data) {
+                              out_str(sketch->rows[r].cells[c].data);
+                          }
+                      }
+                      set_fg(get_fg());
+                      if (in_sel) set_bg(get_bg());
+                  }
+                  rs->virtual_row++;
+              }
+          }
+          rs->pos += total_len;
+      }
+      rs->col_width = 0;
+      return true;
+  }
 
 //! Render table element
 static bool render_table_element(const RenderCtx *ctx, RenderState *rs, const Block *block) {

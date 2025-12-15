@@ -102,7 +102,7 @@ Fenced code blocks display with language-aware syntax highlighting for 35+ langu
 
 ### Writing Timer
 
-Optional timed writing sessions to encourage flow. Select 5-30 minutes (or unlimited), then write until the timer completes. Auto-saves every 5 minutes.
+Optional timed writing sessions to encourage flow. Select 5-30 minutes (or unlimited), then write until the timer completes. Auto-saves every 5 seconds.
 
 - `Ctrl+P` - pause/resume timer
 - `Ctrl+T` - add 5 minutes
@@ -183,13 +183,17 @@ make install  # optional, installs to /usr/local/bin
 
 ```bash
 # Start a new writing session
-./dawn
+dawn
 
-# Open an existing file
-./dawn -f document.md
+# Open an existing file for editing
+dawn document.md
 
 # Preview (read-only)
-./dawn -p document.md
+dawn -p document.md
+
+# Print rendered output to stdout
+dawn -P document.md
+cat document.md | dawn -P
 ```
 
 ---

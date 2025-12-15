@@ -64,6 +64,7 @@ typedef struct {
         } footnote;
 
         struct {
+            void *tex_sketch;       //!< Cached TeX sketch (NULL if not computed)
             uint32_t content_start; //!< Math content start
             uint16_t content_len;   //!< Math content length
         } math;

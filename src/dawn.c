@@ -2273,60 +2273,60 @@ static bool render_inline_math(const RenderCtx *ctx, RenderState *rs, const Inli
     get_selection(&sel_s, &sel_e);
     bool in_sel = has_selection() && rs->pos < sel_e && rs->pos + math_total > sel_s;
 
-    char *latex = malloc(content_len + 1);
-    if (latex) {
-        for (size_t i = 0; i < content_len; i++) {
-            latex[i] = gap_at(&app.text, content_start + i);
+    TexSketch *sketch = (TexSketch *)run->data.math.tex_sketch;
+    if (!sketch) {
+        char *latex = malloc(content_len + 1);
+        if (latex) {
+            for (size_t i = 0; i < content_len; i++) {
+                latex[i] = gap_at(&app.text, content_start + i);
+            }
+            latex[content_len] = '\0';
+            sketch = tex_render_inline(latex, content_len, true);
+            free(latex);
+            // Cache for later use
+            ((InlineRun *)run)->data.math.tex_sketch = sketch;
         }
-        latex[content_len] = '\0';
+    }
 
-        TexSketch *sketch = tex_render_inline(latex, content_len, true);
-        free(latex);
-
-        if (sketch && sketch->height == 1) {
-            rs->pos += math_total;
+    if (sketch && sketch->height == 1) {
+        rs->pos += math_total;
+        if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
+            if (in_sel) set_bg(get_select());
+            set_fg(get_accent());
+            for (int32_t c = 0; c < sketch->rows[0].count; c++) {
+                if (sketch->rows[0].cells[c].data) {
+                    out_str(sketch->rows[0].cells[c].data);
+                }
+            }
+            set_fg(get_fg());
+            if (in_sel) set_bg(get_bg());
+        }
+        rs->col_width += sketch->width;
+        return true;
+    } else if (sketch && sketch->height > 1) {
+        // Multi-row inline math - position at current column
+        int32_t start_col = ctx->L.margin + 1 + rs->col_width;
+        rs->pos += math_total;
+        for (int32_t r = 0; r < sketch->height; r++) {
+            screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
             if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
+                move_to(screen_row, start_col);
                 if (in_sel) set_bg(get_select());
                 set_fg(get_accent());
-                for (int32_t c = 0; c < sketch->rows[0].count; c++) {
-                    if (sketch->rows[0].cells[c].data) {
-                        out_str(sketch->rows[0].cells[c].data);
+                for (int32_t c = 0; c < sketch->rows[r].count; c++) {
+                    if (sketch->rows[r].cells[c].data) {
+                        out_str(sketch->rows[r].cells[c].data);
                     }
                 }
                 set_fg(get_fg());
                 if (in_sel) set_bg(get_bg());
             }
-            rs->col_width += sketch->width;
-            tex_sketch_free(sketch);
-            return true;
-        } else if (sketch && sketch->height > 1) {
-            // Multi-row inline math - position at current column
-            int32_t start_col = ctx->L.margin + 1 + rs->col_width;
-            rs->pos += math_total;
-            for (int32_t r = 0; r < sketch->height; r++) {
-                screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
-                if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
-                    move_to(screen_row, start_col);
-                    if (in_sel) set_bg(get_select());
-                    set_fg(get_accent());
-                    for (int32_t c = 0; c < sketch->rows[r].count; c++) {
-                        if (sketch->rows[r].cells[c].data) {
-                            out_str(sketch->rows[r].cells[c].data);
-                        }
-                    }
-                    set_fg(get_fg());
-                    if (in_sel) set_bg(get_bg());
-                }
-                rs->virtual_row++;
-            }
-            rs->col_width += sketch->width;
-            tex_sketch_free(sketch);
-            return true;
+            rs->virtual_row++;
         }
-        if (sketch) tex_sketch_free(sketch);
+        rs->col_width += sketch->width;
+        return true;
     }
-    
-    // Fallback
+
     rs->pos += math_total;
     if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
         set_fg(get_accent());

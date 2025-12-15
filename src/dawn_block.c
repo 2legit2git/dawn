@@ -1230,7 +1230,15 @@ void block_parse_inline_runs(Block *block, const GapBuffer *gb) {
 }
 
 void block_free_inline_runs(Block *block) {
-    free(block->inline_runs);
+    if (block->inline_runs) {
+        for (int32_t i = 0; i < block->inline_run_count; i++) {
+            InlineRun *run = &block->inline_runs[i];
+            if (run->type == RUN_INLINE_MATH && run->data.math.tex_sketch) {
+                tex_sketch_free(run->data.math.tex_sketch);
+            }
+        }
+        free(block->inline_runs);
+    }
     block->inline_runs = NULL;
     block->inline_run_count = 0;
     block->inline_run_capacity = 0;
@@ -1721,7 +1729,15 @@ InlineParseResult *block_parse_inline_string(const char *text, size_t len) {
 
 void block_parse_result_free(InlineParseResult *result) {
     if (!result) return;
-    free(result->runs);
+    if (result->runs) {
+        for (int32_t i = 0; i < result->run_count; i++) {
+            InlineRun *run = &result->runs[i];
+            if (run->type == RUN_INLINE_MATH && run->data.math.tex_sketch) {
+                tex_sketch_free(run->data.math.tex_sketch);
+            }
+        }
+        free(result->runs);
+    }
     free(result);
 }
 

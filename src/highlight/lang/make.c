@@ -18,8 +18,11 @@ static const hl_detect_rule_t detect[] = {
     { "\\b(ifneq|endif|if|elif|then|fi|echo|\\.PHONY)\\b|\\$", 10 },
 };
 
+static const char* const aliases[] = { "makefile", NULL };
+
 static const hl_lang_def_t lang = {
     .name = "make",
+    .aliases = aliases,
     .rules = rules,
     .rule_count = sizeof(rules) / sizeof(rules[0]),
     .default_token = HL_TOKEN_NONE,

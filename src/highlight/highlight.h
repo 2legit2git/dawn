@@ -84,6 +84,7 @@ typedef struct {
 //! Language definition - array of rules defining a language
 struct hl_lang_def {
     const char* name;
+    const char* const* aliases;
     const hl_lang_rule_t* rules;
     size_t rule_count;
     hl_token_t default_token;
@@ -194,6 +195,7 @@ const hl_lang_def_t* hl_lang_asm(void);
 const hl_lang_def_t* hl_lang_bash(void);
 const hl_lang_def_t* hl_lang_bf(void);
 const hl_lang_def_t* hl_lang_c(void);
+const hl_lang_def_t* hl_lang_csharp(void);
 const hl_lang_def_t* hl_lang_css(void);
 const hl_lang_def_t* hl_lang_csv(void);
 const hl_lang_def_t* hl_lang_diff(void);

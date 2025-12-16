@@ -14,8 +14,11 @@ static const hl_detect_rule_t detect[] = {
     { "^(FROM|ENTRYPOINT|RUN)\\b", 500 },
 };
 
+static const char* const aliases[] = { "docker", NULL };
+
 static const hl_lang_def_t lang = {
     .name = "dockerfile",
+    .aliases = aliases,
     .rules = rules,
     .rule_count = sizeof(rules) / sizeof(rules[0]),
     .default_token = HL_TOKEN_NONE,

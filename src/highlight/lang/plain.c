@@ -7,8 +7,11 @@ static const hl_lang_rule_t rules[] = {
     { .pattern = "\"(?:[^\"\\\\]|\\\\.)*\"", .token = HL_TOKEN_STR },
 };
 
+static const char* const aliases[] = { "text", "txt", NULL };
+
 static const hl_lang_def_t lang = {
     .name = "plain",
+    .aliases = aliases,
     .rules = rules,
     .rule_count = sizeof(rules) / sizeof(rules[0]),
     .default_token = HL_TOKEN_NONE,

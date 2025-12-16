@@ -34,8 +34,11 @@ static const hl_detect_rule_t detect[] = {
     { "\\b(func|fmt|package)\\b", 100 },
 };
 
+static const char* const aliases[] = { "golang", NULL };
+
 static const hl_lang_def_t lang = {
     .name = "go",
+    .aliases = aliases,
     .rules = rules,
     .rule_count = sizeof(rules) / sizeof(rules[0]),
     .default_token = HL_TOKEN_NONE,

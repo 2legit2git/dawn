@@ -35,8 +35,11 @@ static const hl_detect_rule_t detect[] = {
     { "\\b(console|await|async|function|export|import|this|class|for|let|const|map|join|require|implements|interface|namespace)\\b", 10 },
 };
 
+static const char* const aliases[] = { "typescript", NULL };
+
 static const hl_lang_def_t lang = {
     .name = "ts",
+    .aliases = aliases,
     .rules = rules,
     .rule_count = sizeof(rules) / sizeof(rules[0]),
     .default_token = HL_TOKEN_NONE,

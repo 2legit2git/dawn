@@ -20,8 +20,11 @@ static const hl_detect_rule_t detect[] = {
     { "\\[.*\\](.*)", 10 },
 };
 
+static const char* const aliases[] = { "markdown", NULL };
+
 static const hl_lang_def_t lang = {
     .name = "md",
+    .aliases = aliases,
     .rules = rules,
     .rule_count = sizeof(rules) / sizeof(rules[0]),
     .default_token = HL_TOKEN_NONE,

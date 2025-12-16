@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #define PCRE2_CODE_UNIT_WIDTH 8
 #include <pcre2.h>
@@ -250,8 +251,15 @@ static compiled_lang_t* find_language(hl_ctx_t* ctx, const char* name)
         return NULL;
 
     for (lang_entry_t* e = ctx->languages; e; e = e->next) {
-        if (e->def->name && strcmp(e->def->name, name) == 0) {
+        if (e->def->name && strcasecmp(e->def->name, name) == 0) {
             return e->compiled;
+        }
+        if (e->def->aliases) {
+            for (const char* const* alias = e->def->aliases; *alias; alias++) {
+                if (strcasecmp(*alias, name) == 0) {
+                    return e->compiled;
+                }
+            }
         }
     }
 
@@ -689,6 +697,7 @@ hl_ctx_t* hl_ctx_new_with_defaults(bool dark_mode)
     hl_ctx_register_lang(ctx, hl_lang_bash());
     hl_ctx_register_lang(ctx, hl_lang_bf());
     hl_ctx_register_lang(ctx, hl_lang_c());
+    hl_ctx_register_lang(ctx, hl_lang_csharp());
     hl_ctx_register_lang(ctx, hl_lang_css());
     hl_ctx_register_lang(ctx, hl_lang_csv());
     hl_ctx_register_lang(ctx, hl_lang_diff());

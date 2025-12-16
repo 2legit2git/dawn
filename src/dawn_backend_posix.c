@@ -1557,6 +1557,23 @@ static void posix_get_local_time(DawnTime *out) {
     out->wday = t->tm_wday;
 }
 
+static void posix_get_local_time_from(DawnTime *out, int64_t timestamp) {
+    if (!out) return;
+    time_t ts = (time_t)timestamp;
+    struct tm *t = localtime(&ts);
+    if (!t) {
+        memset(out, 0, sizeof(*out));
+        return;
+    }
+    out->year = t->tm_year + 1900;
+    out->mon = t->tm_mon;
+    out->mday = t->tm_mday;
+    out->hour = t->tm_hour;
+    out->min = t->tm_min;
+    out->sec = t->tm_sec;
+    out->wday = t->tm_wday;
+}
+
 static const char *posix_get_username(void) {
     static char name[256];
 
@@ -2193,6 +2210,7 @@ const DawnBackend dawn_backend_posix = {
     .clock = posix_clock,
     .sleep_ms = posix_sleep_ms,
     .localtime = posix_get_local_time,
+    .localtime_from = posix_get_local_time_from,
     .username = posix_get_username,
 
     // Images

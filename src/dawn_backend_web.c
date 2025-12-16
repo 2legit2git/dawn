@@ -1251,6 +1251,23 @@ static void web_get_local_time(DawnTime *out) {
     out->wday = wday;
 }
 
+static void web_get_local_time_from(DawnTime *out, int64_t timestamp) {
+    if (!out) return;
+    time_t ts = (time_t)timestamp;
+    struct tm *t = localtime(&ts);
+    if (!t) {
+        memset(out, 0, sizeof(*out));
+        return;
+    }
+    out->year = t->tm_year + 1900;
+    out->mon = t->tm_mon;
+    out->mday = t->tm_mday;
+    out->hour = t->tm_hour;
+    out->min = t->tm_min;
+    out->sec = t->tm_sec;
+    out->wday = t->tm_wday;
+}
+
 static char *web_username_buf = NULL;
 
 static const char *web_get_username(void) {
@@ -1429,6 +1446,7 @@ const DawnBackend dawn_backend_web = {
     .clock = web_clock,
     .sleep_ms = web_sleep_ms,
     .localtime = web_get_local_time,
+    .localtime_from = web_get_local_time_from,
     .username = web_get_username,
 
     // Images

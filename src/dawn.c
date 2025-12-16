@@ -10,6 +10,7 @@
 
 #include "dawn_types.h"
 #include "dawn_app.h"
+#include "dawn_history.h"
 
 // Debug assert - only compiles in debug builds
 #ifdef NDEBUG
@@ -28,6 +29,7 @@
 #endif
 
 #include "dawn_gap.h"
+#include "dawn_fm.h"
 #include "dawn_theme.h"
 #include "dawn_clipboard.h"
 #include "dawn_timer.h"
@@ -727,10 +729,12 @@ static void update_title(void) {
         case MODE_TITLE_EDIT:
         case MODE_BLOCK_EDIT:
         case MODE_TOC:
-        case MODE_SEARCH:
+        case MODE_SEARCH: {
             // Use document title if available, otherwise "Dawn"
-            DAWN_BACKEND(app)->set_title(app.session_title ? app.session_title : "Dawn");
+            const char *title = fm_get_string(app.frontmatter, "title");
+            DAWN_BACKEND(app)->set_title(title ? title : "Dawn");
             break;
+        }
         default:
             DAWN_BACKEND(app)->set_title("Dawn");
             break;
@@ -1126,7 +1130,8 @@ static bool render_hr_element(const RenderCtx *ctx, RenderState *rs, const Block
     size_t hr_len = block->end - block->start;
     if (hr_len > 0 && gap_at(&app.text, block->end - 1) == '\n') hr_len--;
     int32_t screen_row = VROW_TO_SCREEN(&ctx->L, rs->virtual_row, app.scroll_y);
-    bool cursor_in_hr = CURSOR_IN_RANGE(app.cursor, rs->pos, rs->pos + hr_len, app.hide_cursor_syntax);
+    // Show raw --- when cursor is anywhere on the HR line (including at end)
+    bool cursor_in_hr = app.cursor >= rs->pos && app.cursor <= rs->pos + hr_len && !app.hide_cursor_syntax;
 
     // Check if HR overlaps selection
     size_t sel_s, sel_e;
@@ -1142,6 +1147,8 @@ static bool render_hr_element(const RenderCtx *ctx, RenderState *rs, const Block
             if (ch == '\n') { rs->pos++; break; }
             wrap_and_render_grapheme_raw(ctx, rs);
         }
+        // Track cursor at end of HR content
+        track_cursor(ctx, rs);
         set_fg(get_fg());
     } else {
         if (IS_ROW_VISIBLE(&ctx->L, screen_row, ctx->max_row)) {
@@ -2777,8 +2784,8 @@ static void new_session(void) {
              history_dir(), lt.year, lt.mon + 1, lt.mday, lt.hour, lt.min, lt.sec);
     app.session_path = strdup(path);
 
-    free(app.session_title);
-    app.session_title = NULL;
+    fm_free(app.frontmatter);
+    app.frontmatter = NULL;
     app.cursor = 0;
     app.selecting = false;
     app.timer_done = false;
@@ -2919,19 +2926,21 @@ static void handle_writing(int32_t key) {
             }
             break;
         
-        case 7:
+        case 7: {
             if (!CAN_MODIFY()) break;
             app.title_edit_len = 0;
             app.title_edit_cursor = 0;
-            if (app.session_title) {
-                size_t tlen = strlen(app.session_title);
+            const char *title = fm_get_string(app.frontmatter, "title");
+            if (title) {
+                size_t tlen = strlen(title);
                 if (tlen >= sizeof(app.title_edit_buf)) tlen = sizeof(app.title_edit_buf) - 1;
-                memcpy(app.title_edit_buf, app.session_title, tlen);
+                memcpy(app.title_edit_buf, title, tlen);
                 app.title_edit_len = tlen;
                 app.title_edit_cursor = tlen;
             }
             MODE_PUSH(MODE_TITLE_EDIT);
             break;
+        }
         
         case 26: if (CAN_MODIFY()) undo(); break;
         case 25: if (CAN_MODIFY()) redo(); break;
@@ -3428,10 +3437,11 @@ static void handle_input(void) {
                         load_file_for_editing(app.history[app.hist_sel].path);
                         app.title_edit_len = 0;
                         app.title_edit_cursor = 0;
-                        if (app.session_title) {
-                            size_t tlen = strlen(app.session_title);
+                        const char *title = fm_get_string(app.frontmatter, "title");
+                        if (title) {
+                            size_t tlen = strlen(title);
                             if (tlen >= sizeof(app.title_edit_buf)) tlen = sizeof(app.title_edit_buf) - 1;
-                            memcpy(app.title_edit_buf, app.session_title, tlen);
+                            memcpy(app.title_edit_buf, title, tlen);
                             app.title_edit_len = tlen;
                             app.title_edit_cursor = tlen;
                         }
@@ -3486,21 +3496,21 @@ static void handle_input(void) {
         case MODE_TITLE_EDIT:
             switch (key) {
                 case '\x1b': MODE_POP(); break;
-                case '\r': case '\n':
-                    free(app.session_title);
+                case '\r': case '\n': {
+                    // Ensure we have frontmatter
+                    if (!app.frontmatter) app.frontmatter = fm_create();
+                    // Update title in frontmatter
                     if (app.title_edit_len > 0) {
-                        app.session_title = malloc(app.title_edit_len + 1);
-                        if (app.session_title) {
-                            memcpy(app.session_title, app.title_edit_buf, app.title_edit_len);
-                            app.session_title[app.title_edit_len] = '\0';
-                        }
+                        app.title_edit_buf[app.title_edit_len] = '\0';
+                        fm_set_string(app.frontmatter, "title", app.title_edit_buf);
                     } else {
-                        app.session_title = NULL;
+                        fm_remove(app.frontmatter, "title");
                     }
                     save_session();
                     update_title();
                     MODE_POP();
                     break;
+                }
                 case 127: case '\b':
                     if (app.title_edit_cursor > 0) {
                         memmove(app.title_edit_buf + app.title_edit_cursor - 1,
@@ -3774,7 +3784,8 @@ bool dawn_engine_init(Theme theme) {
     }
     
     gap_init(&app.text, 4096);
-    
+    hist_load();
+
     app.block_cache = malloc(sizeof(BlockCache));
     if (app.block_cache) block_cache_init((BlockCache *)app.block_cache);
     
@@ -3804,7 +3815,7 @@ void dawn_engine_shutdown(void) {
     
     gap_free(&app.text);
     free(app.session_path); app.session_path = NULL;
-    free(app.session_title); app.session_title = NULL;
+    fm_free(app.frontmatter); app.frontmatter = NULL;
     chat_clear();
     
     if (app.history) {
@@ -4192,7 +4203,14 @@ static void render_writing(void) {
                     }
                     if (newlines_to_cursor == bl) {
                         rs.cursor_virtual_row = running_vrow;
-                        rs.cursor_col = L.margin + 1;
+                        // Calculate cursor column accounting for spaces/tabs
+                        int32_t col_offset = 0;
+                        for (size_t cp = blank_pos; cp < app.cursor; cp++) {
+                            char c = gap_at(&app.text, cp);
+                            if (c == '\t') col_offset += 4 - (col_offset % 4);
+                            else if (c == ' ') col_offset++;
+                        }
+                        rs.cursor_col = L.margin + 1 + col_offset;
                     }
                 }
 
@@ -4243,11 +4261,22 @@ static void render_writing(void) {
         // Track cursor if it's in the trailing blank region (not at EOF)
         if (app.cursor >= trailing_start && app.cursor < len) {
             int32_t newlines_before_cursor = 0;
+            size_t line_start = trailing_start;
             for (size_t p = trailing_start; p < app.cursor; p++) {
-                if (gap_at(&app.text, p) == '\n') newlines_before_cursor++;
+                if (gap_at(&app.text, p) == '\n') {
+                    newlines_before_cursor++;
+                    line_start = p + 1;
+                }
             }
             rs.cursor_virtual_row = running_vrow + newlines_before_cursor;
-            rs.cursor_col = L.margin + 1;
+            // Calculate cursor column accounting for spaces/tabs
+            int32_t col_offset = 0;
+            for (size_t cp = line_start; cp < app.cursor; cp++) {
+                char c = gap_at(&app.text, cp);
+                if (c == '\t') col_offset += 4 - (col_offset % 4);
+                else if (c == ' ') col_offset++;
+            }
+            rs.cursor_col = L.margin + 1 + col_offset;
         }
 
         // Render trailing blank lines and increment running_vrow
@@ -4277,15 +4306,27 @@ static void render_writing(void) {
     // Handle cursor at end of document
     if (!print_mode && app.cursor >= len) {
         Block *last = (bc && bc->valid && bc->count > 0) ? &bc->blocks[bc->count - 1] : NULL;
-        // Skip override only for headers at EOF with NO trailing newline when using scaled header renderer
-        // (header renderer tracks cursor at content end, but not after newline)
-        // In non-scaled mode, paragraph rendering is used which doesn't track cursor in prefix
+        // Skip override for blocks that already track cursor at their end:
+        // - Headers at EOF with NO trailing newline when using scaled header renderer
+        // - HR blocks (they track cursor position in raw mode)
         bool has_newline = last && last->end > 0 && gap_at(&app.text, last->end - 1) == '\n';
-        bool skip = last && app.cursor == last->end && last->type == BLOCK_HEADER && !has_newline
-                    && HAS_CAP(DAWN_CAP_TEXT_SIZING);
+        bool skip = last && app.cursor == last->end && !has_newline &&
+                    (last->type == BLOCK_HR || (last->type == BLOCK_HEADER && HAS_CAP(DAWN_CAP_TEXT_SIZING)));
         if (!skip) {
             rs.cursor_virtual_row = running_vrow;
-            rs.cursor_col = L.margin + 1 + rs.col_width;
+            // Calculate cursor column - find start of last line and measure spaces/tabs
+            size_t trailing_start = last ? last->end : 0;
+            size_t line_start = trailing_start;
+            for (size_t p = trailing_start; p < len; p++) {
+                if (gap_at(&app.text, p) == '\n') line_start = p + 1;
+            }
+            int32_t col_offset = 0;
+            for (size_t cp = line_start; cp < len; cp++) {
+                char c = gap_at(&app.text, cp);
+                if (c == '\t') col_offset += 4 - (col_offset % 4);
+                else if (c == ' ') col_offset++;
+            }
+            rs.cursor_col = L.margin + 1 + (col_offset > 0 ? col_offset : rs.col_width);
         }
     }
 

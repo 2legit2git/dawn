@@ -254,6 +254,134 @@ void block_cache_parse(BlockCache *bc, const GapBuffer *gb, int32_t wrap_width, 
     bc->valid = true;
 }
 
+bool block_cache_normalize_setext(BlockCache *bc, GapBuffer *gb) {
+    (void)bc; // Not used - we scan the buffer directly
+
+    bool modified = false;
+    size_t len = gap_len(gb);
+    if (len == 0) return false;
+
+    // Scan backwards through the buffer to find setext patterns
+    // This avoids position shift issues when modifying
+    size_t pos = len;
+    while (pos > 0) {
+        pos--;
+
+        // Look for start of a line with = or -
+        if (pos > 0 && gap_at(gb, pos - 1) != '\n') continue;
+
+        // Check if this line is a valid setext underline (all = or all -)
+        size_t line_start = pos;
+        char underline_char = gap_at(gb, pos);
+        if (underline_char != '=' && underline_char != '-') continue;
+
+        // Count underline characters
+        size_t underline_end = pos;
+        while (underline_end < len && gap_at(gb, underline_end) == underline_char) {
+            underline_end++;
+        }
+
+        // Skip trailing whitespace
+        size_t check = underline_end;
+        while (check < len && (gap_at(gb, check) == ' ' || gap_at(gb, check) == '\t')) {
+            check++;
+        }
+
+        // Must be followed by newline or EOF
+        if (check < len && gap_at(gb, check) != '\n') continue;
+
+        // Include trailing newline in underline region
+        size_t underline_full_end = (check < len) ? check + 1 : check;
+
+        // Must have at least 1 underline char (CommonMark says 1+)
+        if (underline_end - line_start < 1) continue;
+
+        // Now check the line above - must have content (not just whitespace)
+        if (line_start == 0) continue; // No line above
+
+        // Find start of the heading content line
+        size_t content_end = line_start - 1; // Position of newline before underline
+        size_t content_start = content_end;
+        while (content_start > 0 && gap_at(gb, content_start - 1) != '\n') {
+            content_start--;
+        }
+
+        // Check that content line has non-whitespace content
+        bool has_content = false;
+        for (size_t i = content_start; i < content_end; i++) {
+            char c = gap_at(gb, i);
+            if (c != ' ' && c != '\t') {
+                has_content = true;
+                break;
+            }
+        }
+        if (!has_content) continue;
+
+        // Skip if content line starts with # (already ATX)
+        size_t first_char = content_start;
+        while (first_char < content_end && (gap_at(gb, first_char) == ' ' || gap_at(gb, first_char) == '\t')) {
+            first_char++;
+        }
+        if (first_char < content_end && gap_at(gb, first_char) == '#') continue;
+
+        // Check that line before content is blank or start of file (avoid mid-paragraph)
+        if (content_start > 0) {
+            size_t prev_line_end = content_start - 1;
+            size_t prev_line_start = prev_line_end;
+            while (prev_line_start > 0 && gap_at(gb, prev_line_start - 1) != '\n') {
+                prev_line_start--;
+            }
+            // Check if previous line has non-whitespace
+            bool prev_has_content = false;
+            for (size_t i = prev_line_start; i < prev_line_end; i++) {
+                char c = gap_at(gb, i);
+                if (c != ' ' && c != '\t') {
+                    prev_has_content = true;
+                    break;
+                }
+            }
+            if (prev_has_content) continue; // Part of a paragraph, not setext
+        }
+
+        // This is a valid setext heading - convert to ATX
+        int level = (underline_char == '=') ? 1 : 2;
+        size_t prefix_len = (level == 1) ? 2 : 3;
+        const char *prefix = (level == 1) ? "# " : "## ";
+
+        // Adjust cursor position
+        if (app.cursor >= content_start && app.cursor < underline_full_end) {
+            if (app.cursor <= content_end) {
+                app.cursor += prefix_len;
+            } else {
+                app.cursor = content_end + prefix_len;
+            }
+        } else if (app.cursor >= underline_full_end) {
+            size_t old_size = underline_full_end - content_start;
+            size_t new_size = (content_end - content_start) + prefix_len + 1;
+            if (new_size < old_size) {
+                app.cursor -= (old_size - new_size);
+            } else {
+                app.cursor += (new_size - old_size);
+            }
+        }
+
+        // Delete from content_end to underline_full_end (removes "\n===\n" or "\n---\n")
+        gap_delete(gb, content_end, underline_full_end - content_end);
+
+        // Add newline after content
+        gap_insert(gb, content_end, '\n');
+
+        // Insert ATX prefix at content_start
+        gap_insert_str(gb, content_start, prefix, prefix_len);
+
+        modified = true;
+        len = gap_len(gb);
+        pos = content_start; // Continue scanning before this heading
+    }
+
+    return modified;
+}
+
 // #endregion
 
 // #region Block Detection Helpers
@@ -664,61 +792,34 @@ static void parse_paragraph(Block *block, const GapBuffer *gb, size_t pos, int32
 
     size_t len = gap_len(gb);
     size_t end = pos;
-    size_t last_line_start = pos;
-    bool has_content = false;  // Track if we have non-blank content
 
-    // Check if first line starts with 4+ spaces (indented code - can't be setext)
-    bool first_line_indented = false;
-    {
-        int32_t indent = 0;
-        size_t p = pos;
-        while (p < len && ISBLANK_(gap_at(gb, p))) {
-            if (gap_at(gb, p) == '\t') indent += 4;
-            else indent++;
-            p++;
-        }
-        first_line_indented = (indent >= 4);
-    }
+    // NOTE: Setext headings are NOT parsed here. They are normalized to ATX
+    // format on document load via block_cache_normalize_setext(). During editing,
+    // typing "text\n---" will be parsed as paragraph + HR (if blank line before)
+    // or just paragraph (if no blank line).
 
     while (end < len) {
         char c = gap_at(gb, end);
 
-        // Track if we have any non-whitespace content
-        if (!ISSPACE_(c)) {
-            has_content = true;
-        }
-
         if (c == '\n') {
-            // Check for setext heading underline on next line
-            // Only if we have content and first line isn't indented code
-            if (has_content && !first_line_indented && end + 1 < len) {
-                size_t underline_len;
-                int32_t setext_level = md_check_setext_underline(gb, end + 1, &underline_len);
-                if (setext_level > 0) {
-                    // This is a setext heading!
-                    block->type = BLOCK_HEADER;
-                    block->data.header.level = setext_level;
-                    block->data.header.content_start = pos;
-                    block->data.header.id_start = 0;
-                    block->data.header.id_len = 0;
-                    // End includes the underline
-                    block->end = end + 1 + underline_len;
-                    return;
+            // Check for blank line (paragraph end) - includes lines with only whitespace
+            if (end + 1 < len) {
+                size_t next_line = end + 1;
+                // Skip whitespace on next line
+                while (next_line < len && (gap_at(gb, next_line) == ' ' || gap_at(gb, next_line) == '\t')) {
+                    next_line++;
                 }
-            }
-
-            // Check for blank line (paragraph end)
-            if (end + 1 < len && gap_at(gb, end + 1) == '\n') {
-                end++;  // Include first newline
-                break;
+                // If next line is empty or just whitespace followed by newline/EOF, it's a blank line
+                if (next_line >= len || gap_at(gb, next_line) == '\n') {
+                    end++;  // Include first newline
+                    break;
+                }
             }
 
             // Check if next line starts a block element
             if (end + 1 < len && is_block_start(gb, end + 1)) {
                 break;
             }
-
-            last_line_start = end + 1;
         }
         end++;
     }
@@ -734,7 +835,6 @@ static void parse_paragraph(Block *block, const GapBuffer *gb, size_t pos, int32
     block_parse_inline_runs(block, gb);
 
     (void)wrap_width;  // Used in vrow calculation
-    (void)last_line_start;
 }
 
 // #endregion

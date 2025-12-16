@@ -5,7 +5,10 @@
 #endif
 
 #include "dawn_file.h"
+#include "dawn_fm.h"
+#include "dawn_history.h"
 #include "dawn_gap.h"
+#include "dawn_block.h"
 #include "dawn_chat.h"
 #include "dawn_utils.h"
 #include "dawn_image.h"
@@ -43,26 +46,53 @@ void save_session(void) {
     char *txt = gap_to_str(&app.text);
     size_t txt_len = strlen(txt);
 
+    // Ensure we have frontmatter
+    Frontmatter *fm = app.frontmatter;
+    if (!fm) {
+        fm = fm_create();
+        app.frontmatter = fm;
+    }
+
+    // Set default fields if missing
+    if (!fm_has_key(fm, "title")) {
+        fm_set_string(fm, "title", "Untitled");
+    }
+    if (!fm_has_key(fm, "author")) {
+        fm_set_string(fm, "author", get_username());
+    }
+
+    // Always update date
     DawnTime lt;
     DAWN_BACKEND(app)->localtime(&lt);
+    char date_buf[16];
+    snprintf(date_buf, sizeof(date_buf), "%04d-%02d-%02d", lt.year, lt.mon + 1, lt.mday);
+    fm_set_string(fm, "date", date_buf);
 
-    size_t fm_size = 256;
-    char *content = malloc(fm_size + txt_len + 16);
+    // Serialize frontmatter
+    size_t fm_len = 0;
+    char *fm_str = fm_to_string(fm, &fm_len);
 
-    int32_t fm_len = snprintf(content, fm_size,
-        "---\n"
-        "title: %s\n"
-        "author: %s\n"
-        "date: %04d-%02d-%02d\n"
-        "---\n\n",
-        app.session_title ? app.session_title : "Untitled",
-        get_username(),
-        lt.year, lt.mon + 1, lt.mday);
+    // Build final content
+    size_t total = (fm_str ? fm_len : 0) + 1 + txt_len;
+    char *content = malloc(total + 1);
 
-    memcpy(content + fm_len, txt, txt_len);
-    content[fm_len + txt_len] = '\0';
+    size_t pos = 0;
+    if (fm_str) {
+        memcpy(content, fm_str, fm_len);
+        pos = fm_len;
+        // Add blank line only if text doesn't already start with newline
+        if (txt_len == 0 || txt[0] != '\n') {
+            content[pos++] = '\n';
+        }
+        free(fm_str);
+    }
+    memcpy(content + pos, txt, txt_len);
+    content[pos + txt_len] = '\0';
 
-    DAWN_BACKEND(app)->write_file(app.session_path, content, fm_len + txt_len);
+    DAWN_BACKEND(app)->write_file(app.session_path, content, pos + txt_len);
+
+    // Update history
+    hist_upsert(app.session_path, fm_get_string(fm, "title"));
 
     free(content);
     free(txt);
@@ -72,155 +102,27 @@ void save_session(void) {
         char chat_path[520];
         get_chat_path(app.session_path, chat_path, sizeof(chat_path));
 
-        // Build JSON content
-        size_t json_cap = 1024;
-        char *json = malloc(json_cap);
-        size_t json_len = 0;
-
-        json_len += snprintf(json + json_len, json_cap - json_len, "[\n");
-
+        cJSON *root = cJSON_CreateArray();
         for (int32_t i = 0; i < app.chat_count; i++) {
             ChatMessage *m = &app.chat_msgs[i];
-
-            // Ensure capacity
-            while (json_len + m->len * 2 + 100 >= json_cap) {
-                json_cap *= 2;
-                json = realloc(json, json_cap);
-            }
-
-            json_len += snprintf(json + json_len, json_cap - json_len,
-                "  {\"role\": \"%s\", \"content\": \"",
-                m->is_user ? "user" : "assistant");
-
-            // Escape JSON special characters
-            for (size_t j = 0; j < m->len; j++) {
-                char c = m->text[j];
-                if (json_len + 10 >= json_cap) {
-                    json_cap *= 2;
-                    json = realloc(json, json_cap);
-                }
-                if (c == '"') { json[json_len++] = '\\'; json[json_len++] = '"'; }
-                else if (c == '\\') { json[json_len++] = '\\'; json[json_len++] = '\\'; }
-                else if (c == '\n') { json[json_len++] = '\\'; json[json_len++] = 'n'; }
-                else if (c == '\r') { json[json_len++] = '\\'; json[json_len++] = 'r'; }
-                else if (c == '\t') { json[json_len++] = '\\'; json[json_len++] = 't'; }
-                else if ((uint8_t)c >= 32) json[json_len++] = c;
-            }
-
-            json_len += snprintf(json + json_len, json_cap - json_len,
-                "\"}%s\n", i < app.chat_count - 1 ? "," : "");
+            cJSON *msg = cJSON_CreateObject();
+            cJSON_AddStringToObject(msg, "role", m->is_user ? "user" : "assistant");
+            cJSON_AddStringToObject(msg, "content", m->text);
+            cJSON_AddItemToArray(root, msg);
         }
 
-        json_len += snprintf(json + json_len, json_cap - json_len, "]\n");
+        char *json = cJSON_Print(root);
+        cJSON_Delete(root);
 
-        DAWN_BACKEND(app)->write_file(chat_path, json, json_len);
-        free(json);
-    }
-}
-
-//! Parse frontmatter title from a session file
-//! @param path path to .md file
-//! @return newly allocated title string, or NULL if not found
-static char *parse_frontmatter_title(const char *path) {
-    size_t len;
-    char *content = DAWN_BACKEND(app)->read_file(path, &len);
-    if (!content) return NULL;
-
-    char *title = NULL;
-
-    // Check for opening ---
-    if (len >= 4 && strncmp(content, "---\n", 4) == 0) {
-        char *end = strstr(content + 4, "\n---");
-        if (end) {
-            char *title_line = strstr(content, "title:");
-            if (title_line && title_line < end) {
-                char *val = title_line + 6;
-                while (*val == ' ') val++;
-                char *nl = strchr(val, '\n');
-                if (nl && nl < end) {
-                    size_t title_len = nl - val;
-                    title = malloc(title_len + 1);
-                    memcpy(title, val, title_len);
-                    title[title_len] = '\0';
-                }
-            }
+        if (json) {
+            DAWN_BACKEND(app)->write_file(chat_path, json, strlen(json));
+            free(json);
         }
     }
-
-    free(content);
-    return title;
 }
 
 void load_history(void) {
-    // Free existing history
-    if (app.history) {
-        for (int32_t i = 0; i < app.hist_count; i++) {
-            free(app.history[i].path);
-            free(app.history[i].title);
-            free(app.history[i].date_str);
-        }
-        free(app.history);
-        app.history = NULL;
-        app.hist_count = 0;
-    }
-
-    char **names;
-    int32_t count;
-    if (!DAWN_BACKEND(app)->list_dir(history_dir(), &names, &count)) {
-        return;
-    }
-
-    int32_t cap = 64;
-    app.history = malloc(sizeof(HistoryEntry) * (size_t)cap);
-
-    for (int32_t i = 0; i < count; i++) {
-        // Only .md files, skip .chat.json
-        size_t nlen = strlen(names[i]);
-        if (nlen < 3 || strcmp(names[i] + nlen - 3, ".md") != 0) {
-            free(names[i]);
-            continue;
-        }
-
-        if (app.hist_count >= cap) {
-            cap *= 2;
-            app.history = realloc(app.history, sizeof(HistoryEntry) * (size_t)cap);
-        }
-
-        char full[PATH_MAX];
-        snprintf(full, sizeof(full), "%s/%s", history_dir(), names[i]);
-
-        HistoryEntry *entry = &app.history[app.hist_count];
-        entry->path = strdup(full);
-        entry->title = parse_frontmatter_title(full);
-
-        // Parse date from filename (format: YYYY-MM-DD_HHMM.md)
-        int32_t y, mo, da, h, mi;
-        if (sscanf(names[i], "%d-%d-%d_%d%d", &y, &mo, &da, &h, &mi) == 5) {
-            static const char *months[] = {"","Jan","Feb","Mar","Apr","May","Jun",
-                                           "Jul","Aug","Sep","Oct","Nov","Dec"};
-            char date_buf[64];
-            snprintf(date_buf, sizeof(date_buf), "%s %d, %d at %d:%02d",
-                     months[mo], da, y, h, mi);
-            entry->date_str = strdup(date_buf);
-        } else {
-            entry->date_str = strdup(names[i]);
-        }
-
-        app.hist_count++;
-        free(names[i]);
-    }
-    free(names);
-
-    // Sort newest first (by path, which contains date)
-    for (int32_t i = 0; i < app.hist_count - 1; i++) {
-        for (int32_t j = i + 1; j < app.hist_count; j++) {
-            if (strcmp(app.history[i].path, app.history[j].path) < 0) {
-                HistoryEntry tmp = app.history[i];
-                app.history[i] = app.history[j];
-                app.history[j] = tmp;
-            }
-        }
-    }
+    hist_load();
 }
 
 void load_chat_history(const char *session_path) {
@@ -259,32 +161,17 @@ void load_chat_history(const char *session_path) {
 //! @param size size of content buffer
 //! @param path optional file path (NULL for stdin)
 static void load_content(char *content, size_t size, const char *path) {
-    // Parse and strip frontmatter
-    free(app.session_title);
-    app.session_title = NULL;
+    // Free old frontmatter
+    fm_free(app.frontmatter);
+    app.frontmatter = NULL;
 
-    char *text_start = content;
-    if (size >= 4 && strncmp(content, "---\n", 4) == 0) {
-        char *end = strstr(content + 4, "\n---");
-        if (end) {
-            // Extract title from frontmatter
-            char *title_line = strstr(content, "title:");
-            if (title_line && title_line < end) {
-                char *val = title_line + 6;
-                while (*val == ' ') val++;
-                char *nl = strchr(val, '\n');
-                if (nl && nl < end) {
-                    size_t len = nl - val;
-                    app.session_title = malloc(len + 1);
-                    memcpy(app.session_title, val, len);
-                    app.session_title[len] = '\0';
-                }
-            }
-            // Skip past frontmatter
-            text_start = end + 4;  // Skip \n---
-            if (*text_start == '\n') text_start++;
-            if (*text_start == '\n') text_start++;
-        }
+    // Parse frontmatter
+    const char *text_start = content;
+    size_t consumed = 0;
+    Frontmatter *fm = fm_parse(content, size, &consumed);
+    if (fm) {
+        app.frontmatter = fm;
+        text_start = content + consumed;
     }
 
     // Initialize gap buffer with content (normalize CRLF -> LF)
@@ -292,8 +179,11 @@ static void load_content(char *content, size_t size, const char *path) {
     gap_init(&app.text, 4096);
     size_t text_len = strlen(text_start);
     if (text_len > 0) {
-        text_len = normalize_line_endings(text_start, text_len);
-        gap_insert_str(&app.text, 0, text_start, text_len);
+        // Need mutable copy for normalize
+        char *mutable_text = strdup(text_start);
+        text_len = normalize_line_endings(mutable_text, text_len);
+        gap_insert_str(&app.text, 0, mutable_text, text_len);
+        free(mutable_text);
     }
 
     // Clear image cache when switching documents
@@ -326,7 +216,8 @@ static void load_content(char *content, size_t size, const char *path) {
     }
     #endif
 
-    DAWN_BACKEND(app)->set_title(app.session_title);
+    const char *title = fm_get_string(app.frontmatter, "title");
+    DAWN_BACKEND(app)->set_title(title);
 }
 
 void load_file_for_editing(const char *path) {

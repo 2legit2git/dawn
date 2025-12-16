@@ -163,6 +163,7 @@ typedef struct DawnBackend {
     int64_t (*clock)(DawnClock kind);
     void (*sleep_ms)(int32_t ms);
     void (*localtime)(DawnTime *out);
+    void (*localtime_from)(DawnTime *out, int64_t timestamp);
     const char *(*username)(void);
 
     // Images

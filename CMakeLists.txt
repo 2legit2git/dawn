@@ -35,6 +35,11 @@ add_subdirectory(third-party/pcre2)
 
 add_subdirectory(third-party/utf8proc)
 
+# libfyaml for YAML frontmatter parsing
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(ENABLE_LIBCLANG OFF CACHE BOOL "" FORCE)
+add_subdirectory(third-party/libfyaml)
+
 if(NOT EMSCRIPTEN)
     find_package(CURL REQUIRED)
 
@@ -51,6 +56,7 @@ if(NOT EMSCRIPTEN)
         third-party
         ${CMAKE_BINARY_DIR}/third-party/pcre2
         third-party/pcre2/src
+        third-party/libfyaml/include
     )
 
     target_compile_options(dawn PRIVATE
@@ -58,13 +64,20 @@ if(NOT EMSCRIPTEN)
         $<$<C_COMPILER_ID:AppleClang,Clang>:-Wno-keyword-macro -Wno-newline-eof -Wno-deprecated-declarations>
         ${SANITIZER_FLAGS}
     )
+    set_source_files_properties(src/dawn_fm.c PROPERTIES COMPILE_FLAGS "-Wno-pedantic")
     target_compile_definitions(dawn PRIVATE VERSION="${DAWN_VERSION}")
 
     if(SANITIZER_FLAGS)
         target_link_options(dawn PRIVATE ${SANITIZER_FLAGS})
     endif()
 
-    target_link_libraries(dawn PRIVATE pcre2-8-static utf8proc CURL::libcurl m)
+    target_link_libraries(dawn PRIVATE
+        pcre2-8-static
+        utf8proc
+        fyaml
+        CURL::libcurl
+        m
+    )
 
     if(APPLE)
         target_link_libraries(dawn PRIVATE "-framework ApplicationServices")
@@ -138,10 +151,11 @@ else()
         third-party
         ${CMAKE_BINARY_DIR}/third-party/pcre2
         third-party/pcre2/src
+        third-party/libfyaml/include
     )
 
     target_compile_options(dawn-web PRIVATE -O2)
-    target_link_libraries(dawn-web PRIVATE pcre2-8-static utf8proc)
+    target_link_libraries(dawn-web PRIVATE pcre2-8-static utf8proc fyaml)
 
     set_target_properties(dawn-web PROPERTIES
         OUTPUT_NAME "dawn"

@@ -181,7 +181,7 @@ typedef struct {
 
     // Current Session
     char *session_path;     //!< Path to current document
-    char *session_title;    //!< Document title
+    void *frontmatter;      //!< Frontmatter* - YAML frontmatter data
     char title_edit_buf[256]; //!< Title edit buffer
     size_t title_edit_len;    //!< Title edit length
     size_t title_edit_cursor; //!< Title edit cursor

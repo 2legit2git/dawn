@@ -250,6 +250,13 @@ void block_cache_parse(BlockCache *bc, const GapBuffer *gb, int32_t wrap_width, 
 //! @param bc block cache to invalidate
 void block_cache_invalidate(BlockCache *bc);
 
+//! Normalize setext headings to ATX format
+//! Converts "Heading\n===" to "# Heading" in the buffer
+//! @param bc block cache (must be valid)
+//! @param gb gap buffer to modify
+//! @return true if any changes were made
+bool block_cache_normalize_setext(BlockCache *bc, GapBuffer *gb);
+
 // #endregion
 
 // #region Block Query API

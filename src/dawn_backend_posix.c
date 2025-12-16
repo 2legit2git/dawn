@@ -47,6 +47,9 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
+// SVG support via dawn_svg
+#include "dawn_svg.h"
+
 #define ESC "\x1b"
 #define CSI ESC "["
 
@@ -1858,7 +1861,7 @@ static bool posix_image_is_supported(const char* path)
     }
     lower[i] = '\0';
 
-    return strcmp(lower, "png") == 0 || strcmp(lower, "jpg") == 0 || strcmp(lower, "jpeg") == 0 || strcmp(lower, "gif") == 0 || strcmp(lower, "bmp") == 0;
+    return strcmp(lower, "png") == 0 || strcmp(lower, "jpg") == 0 || strcmp(lower, "jpeg") == 0 || strcmp(lower, "gif") == 0 || strcmp(lower, "bmp") == 0 || strcmp(lower, "svg") == 0;
 }
 
 static bool posix_image_get_size(const char* path, int32_t* out_width, int32_t* out_height)
@@ -2131,20 +2134,45 @@ static bool is_download_in_progress(const char* url)
     return false;
 }
 
+static bool convert_downloaded_to_png(const char* temp_path, const char* final_path, const char* url)
+{
+    if (svg_is_svg_file(url)) {
+        size_t len;
+        char* data = posix_read_file(temp_path, &len);
+        if (!data)
+            return false;
+
+        uint8_t* pixels;
+        int32_t w, h;
+        bool ok = svg_rasterize(data, &pixels, &w, &h);
+        free(data);
+        if (!ok)
+            return false;
+
+        ok = stbi_write_png(final_path, w, h, 4, pixels, w * 4) != 0;
+        free(pixels);
+        return ok;
+    }
+
+    int32_t w, h, channels;
+    uint8_t* pixels = stbi_load(temp_path, &w, &h, &channels, 4);
+    if (!pixels)
+        return false;
+
+    bool ok = stbi_write_png(final_path, w, h, 4, pixels, w * 4) != 0;
+    stbi_image_free(pixels);
+    return ok;
+}
+
 static void finalize_download(AsyncDownload* dl, bool success)
 {
     if (success && dl->temp_path && dl->final_path) {
-        int32_t w, h, channels;
-        uint8_t* pixels = stbi_load(dl->temp_path, &w, &h, &channels, 4);
-        if (pixels) {
-            stbi_write_png(dl->final_path, w, h, 4, pixels, w * 4);
-            stbi_image_free(pixels);
-        } else {
+        if (!convert_downloaded_to_png(dl->temp_path, dl->final_path, dl->url))
             mark_url_failed(dl->url);
-        }
     } else if (dl->url) {
         mark_url_failed(dl->url);
     }
+
     if (dl->temp_path) {
         unlink(dl->temp_path);
         free(dl->temp_path);
@@ -2313,8 +2341,9 @@ static bool ensure_png_cached(const char* src_path, char* out, size_t out_size)
 
     int64_t mtime = posix_get_mtime(abs_path);
 
-    // Create hash from path + mtime
-    char key[PATH_MAX + 32];
+    // Create cache key from path + mtime
+    // INT64_MAX is 19 digits, plus colon separator
+    char key[PATH_MAX + 21];
     snprintf(key, sizeof(key), "%s:%lld", abs_path, (long long)mtime);
 
     char hash_hex[65];
@@ -2327,17 +2356,36 @@ static bool ensure_png_cached(const char* src_path, char* out, size_t out_size)
         return true;
     }
 
-    // Load and convert to PNG
+    // Handle SVG files via dawn_svg
+    if (svg_is_svg_file(abs_path)) {
+        size_t svg_len;
+        char* svg_data = posix_read_file(abs_path, &svg_len);
+        if (!svg_data)
+            return false;
+
+        uint8_t* pixels;
+        int32_t w, h;
+        bool ok = svg_rasterize(svg_data, &pixels, &w, &h);
+        free(svg_data);
+        if (!ok)
+            return false;
+
+        ok = stbi_write_png(out, w, h, 4, pixels, w * 4) != 0;
+        free(pixels);
+        return ok;
+    }
+
+    // Load raster image and convert to PNG
     int32_t w, h, channels;
     uint8_t* pixels = stbi_load(src_path, &w, &h, &channels, 4);
-    assert(pixels && "Failed to load image");
+    if (!pixels) {
+        return false;
+    }
 
     int32_t write_ok = stbi_write_png(out, w, h, 4, pixels, w * 4);
-    (void)write_ok;
     stbi_image_free(pixels);
-    assert(write_ok && "Failed to write PNG");
 
-    return true;
+    return write_ok != 0;
 }
 
 static bool posix_image_resolve_path(const char* raw_path, const char* base_dir,

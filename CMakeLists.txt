@@ -54,6 +54,7 @@ if(NOT EMSCRIPTEN)
     target_include_directories(dawn PRIVATE
         src
         third-party
+        third-party/nanosvg/src
         ${CMAKE_BINARY_DIR}/third-party/pcre2
         third-party/pcre2/src
         third-party/libfyaml/include

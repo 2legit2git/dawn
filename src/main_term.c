@@ -8,7 +8,8 @@
 
 extern const DawnBackend dawn_backend_posix;
 
-int32_t main(int32_t argc, char *argv[]) {
+int32_t main(int32_t argc, char* argv[])
+{
     // Parse command-line arguments
     DawnArgs args = args_parse(argc, argv);
 
@@ -34,7 +35,7 @@ int32_t main(int32_t argc, char *argv[]) {
     }
 
     // Read stdin if needed (before initializing backend)
-    char *stdin_content = NULL;
+    char* stdin_content = NULL;
     size_t stdin_size = 0;
     if (args.flags & ARG_STDIN) {
         stdin_content = args_read_stdin(&stdin_size);

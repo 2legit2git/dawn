@@ -1,24 +1,26 @@
 // dawn_history.c - Session history management
 
 #include "dawn_history.h"
-#include "dawn_types.h"
+#include "cJSON.h"
 #include "dawn_file.h"
 #include "dawn_fm.h"
-#include "cJSON.h"
+#include "dawn_types.h"
+#include <limits.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
-#include <limits.h>
 
 // #region Helpers
 
-static char *history_file_path(void) {
+static char* history_file_path(void)
+{
     static char path[PATH_MAX];
     snprintf(path, sizeof(path), "%s/.history", history_dir());
     return path;
 }
 
-static void format_date(int64_t timestamp, char *buf, size_t len) {
+static void format_date(int64_t timestamp, char* buf, size_t len)
+{
     if (timestamp == 0) {
         snprintf(buf, len, "Unknown");
         return;
@@ -27,31 +29,33 @@ static void format_date(int64_t timestamp, char *buf, size_t len) {
     DawnTime lt;
     DAWN_BACKEND(app)->localtime_from(&lt, timestamp);
 
-    static const char *months[] = {"", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    static const char* months[] = { "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
     int32_t mo = lt.mon + 1;
-    if (mo < 1 || mo > 12) mo = 1;
+    if (mo < 1 || mo > 12)
+        mo = 1;
 
     snprintf(buf, len, "%s %d, %d at %d:%02d",
-             months[mo], lt.mday, lt.year, lt.hour, lt.min);
+        months[mo], lt.mday, lt.year, lt.hour, lt.min);
 }
 
 // #endregion
 
 // #region Lifecycle
 
-void hist_load(void) {
+void hist_load(void)
+{
     hist_free();
 
     size_t len;
-    char *content = DAWN_BACKEND(app)->read_file(history_file_path(), &len);
+    char* content = DAWN_BACKEND(app)->read_file(history_file_path(), &len);
     if (!content) {
         // Try migrating from legacy
         hist_migrate_legacy();
         return;
     }
 
-    cJSON *root = cJSON_ParseWithLength(content, len);
+    cJSON* root = cJSON_ParseWithLength(content, len);
     free(content);
 
     if (!root || !cJSON_IsArray(root)) {
@@ -69,21 +73,24 @@ void hist_load(void) {
     app.history = malloc(sizeof(HistoryEntry) * (size_t)count);
     app.hist_count = 0;
 
-    cJSON *item;
-    cJSON_ArrayForEach(item, root) {
-        cJSON *path_j = cJSON_GetObjectItem(item, "path");
-        cJSON *title_j = cJSON_GetObjectItem(item, "title");
-        cJSON *modified_j = cJSON_GetObjectItem(item, "modified");
+    cJSON* item;
+    cJSON_ArrayForEach(item, root)
+    {
+        cJSON* path_j = cJSON_GetObjectItem(item, "path");
+        cJSON* title_j = cJSON_GetObjectItem(item, "title");
+        cJSON* modified_j = cJSON_GetObjectItem(item, "modified");
 
-        if (!path_j || !cJSON_IsString(path_j)) continue;
+        if (!path_j || !cJSON_IsString(path_j))
+            continue;
 
         // Check file still exists
         size_t dummy;
-        char *check = DAWN_BACKEND(app)->read_file(path_j->valuestring, &dummy);
-        if (!check) continue;  // File deleted, skip
+        char* check = DAWN_BACKEND(app)->read_file(path_j->valuestring, &dummy);
+        if (!check)
+            continue; // File deleted, skip
         free(check);
 
-        HistoryEntry *entry = &app.history[app.hist_count];
+        HistoryEntry* entry = &app.history[app.hist_count];
         entry->path = strdup(path_j->valuestring);
         entry->title = (title_j && cJSON_IsString(title_j)) ? strdup(title_j->valuestring) : NULL;
 
@@ -102,13 +109,14 @@ void hist_load(void) {
     cJSON_Delete(root);
 }
 
-void hist_save(void) {
-    cJSON *root = cJSON_CreateArray();
+void hist_save(void)
+{
+    cJSON* root = cJSON_CreateArray();
 
     for (int32_t i = 0; i < app.hist_count; i++) {
-        HistoryEntry *entry = &app.history[i];
+        HistoryEntry* entry = &app.history[i];
 
-        cJSON *item = cJSON_CreateObject();
+        cJSON* item = cJSON_CreateObject();
         cJSON_AddStringToObject(item, "path", entry->path);
         if (entry->title) {
             cJSON_AddStringToObject(item, "title", entry->title);
@@ -121,7 +129,7 @@ void hist_save(void) {
         cJSON_AddItemToArray(root, item);
     }
 
-    char *json = cJSON_Print(root);
+    char* json = cJSON_Print(root);
     cJSON_Delete(root);
 
     if (json) {
@@ -131,7 +139,8 @@ void hist_save(void) {
     }
 }
 
-void hist_free(void) {
+void hist_free(void)
+{
     if (app.history) {
         for (int32_t i = 0; i < app.hist_count; i++) {
             free(app.history[i].path);
@@ -149,8 +158,10 @@ void hist_free(void) {
 
 // #region Operations
 
-bool hist_upsert(const char *path, const char *title) {
-    if (!path) return false;
+bool hist_upsert(const char* path, const char* title)
+{
+    if (!path)
+        return false;
 
     // Look for existing entry
     for (int32_t i = 0; i < app.hist_count; i++) {
@@ -196,8 +207,10 @@ bool hist_upsert(const char *path, const char *title) {
     return true;
 }
 
-bool hist_remove(const char *path) {
-    if (!path) return false;
+bool hist_remove(const char* path)
+{
+    if (!path)
+        return false;
 
     for (int32_t i = 0; i < app.hist_count; i++) {
         if (strcmp(app.history[i].path, path) == 0) {
@@ -218,12 +231,14 @@ bool hist_remove(const char *path) {
     return false;
 }
 
-HistEntry *hist_find(const char *path) {
-    if (!path) return NULL;
+HistEntry* hist_find(const char* path)
+{
+    if (!path)
+        return NULL;
 
     for (int32_t i = 0; i < app.hist_count; i++) {
         if (strcmp(app.history[i].path, path) == 0) {
-            return (HistEntry *)&app.history[i];
+            return (HistEntry*)&app.history[i];
         }
     }
     return NULL;
@@ -234,25 +249,29 @@ HistEntry *hist_find(const char *path) {
 // #region Migration
 
 //! Parse frontmatter title from a file (for migration)
-static char *parse_frontmatter_title(const char *path) {
+static char* parse_frontmatter_title(const char* path)
+{
     size_t len;
-    char *content = DAWN_BACKEND(app)->read_file(path, &len);
-    if (!content) return NULL;
+    char* content = DAWN_BACKEND(app)->read_file(path, &len);
+    if (!content)
+        return NULL;
 
     size_t consumed = 0;
-    Frontmatter *fm = fm_parse(content, len, &consumed);
+    Frontmatter* fm = fm_parse(content, len, &consumed);
     free(content);
 
-    if (!fm) return NULL;
+    if (!fm)
+        return NULL;
 
-    const char *title = fm_get_string(fm, "title");
-    char *result = title ? strdup(title) : NULL;
+    const char* title = fm_get_string(fm, "title");
+    char* result = title ? strdup(title) : NULL;
     fm_free(fm);
     return result;
 }
 
-void hist_migrate_legacy(void) {
-    char **names;
+void hist_migrate_legacy(void)
+{
+    char** names;
     int32_t count;
     if (!DAWN_BACKEND(app)->list_dir(history_dir(), &names, &count)) {
         return;
@@ -260,12 +279,12 @@ void hist_migrate_legacy(void) {
 
     // Collect valid entries
     typedef struct {
-        char *path;
-        char *title;
+        char* path;
+        char* title;
         int64_t mtime;
     } MigEntry;
 
-    MigEntry *entries = malloc(sizeof(MigEntry) * (size_t)count);
+    MigEntry* entries = malloc(sizeof(MigEntry) * (size_t)count);
     int32_t num_entries = 0;
 
     for (int32_t i = 0; i < count; i++) {

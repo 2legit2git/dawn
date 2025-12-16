@@ -9,8 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <unistd.h>
 #include <sys/select.h>
+#include <unistd.h>
 
 // #region Option Definitions
 
@@ -21,7 +21,7 @@
 // -P        Print mode (render to stdout)
 // -h        Help
 // -v        Version
-static const char *short_opts = "d:t:p:Phv";
+static const char* short_opts = "d:t:p:Phv";
 
 // #endregion
 
@@ -30,8 +30,10 @@ static const char *short_opts = "d:t:p:Phv";
 //! Resolve path to absolute
 //! @param path input path
 //! @return newly allocated absolute path
-static char *resolve_path(const char *path) {
-    if (!path) return NULL;
+static char* resolve_path(const char* path)
+{
+    if (!path)
+        return NULL;
 
     // Already absolute
     if (path[0] == '/') {
@@ -40,10 +42,10 @@ static char *resolve_path(const char *path) {
 
     // Home directory expansion
     if (path[0] == '~' && (path[1] == '/' || path[1] == '\0')) {
-        const char *home = getenv("HOME");
+        const char* home = getenv("HOME");
         if (home) {
-            size_t len = strlen(home) + strlen(path);  // path includes ~
-            char *result = malloc(len);
+            size_t len = strlen(home) + strlen(path); // path includes ~
+            char* result = malloc(len);
             if (result) {
                 snprintf(result, len, "%s%s", home, path + 1);
             }
@@ -55,7 +57,7 @@ static char *resolve_path(const char *path) {
     char cwd[512];
     if (getcwd(cwd, sizeof(cwd))) {
         size_t len = strlen(cwd) + 1 + strlen(path) + 1;
-        char *result = malloc(len);
+        char* result = malloc(len);
         if (result) {
             snprintf(result, len, "%s/%s", cwd, path);
         }
@@ -68,10 +70,14 @@ static char *resolve_path(const char *path) {
 //! Parse theme argument
 //! @param arg theme string ("light" or "dark")
 //! @return 0 for light, 1 for dark, -1 for invalid
-static int32_t parse_theme(const char *arg) {
-    if (!arg) return -1;
-    if (strcasecmp(arg, "light") == 0 || strcmp(arg, "0") == 0) return 0;
-    if (strcasecmp(arg, "dark") == 0 || strcmp(arg, "1") == 0) return 1;
+static int32_t parse_theme(const char* arg)
+{
+    if (!arg)
+        return -1;
+    if (strcasecmp(arg, "light") == 0 || strcmp(arg, "0") == 0)
+        return 0;
+    if (strcasecmp(arg, "dark") == 0 || strcmp(arg, "1") == 0)
+        return 1;
     return -1;
 }
 
@@ -79,9 +85,10 @@ static int32_t parse_theme(const char *arg) {
 
 // #region Public Functions
 
-DawnArgs args_parse(int32_t argc, char *argv[]) {
-    DawnArgs args = {0};
-    args.theme = -1;  // Not set
+DawnArgs args_parse(int32_t argc, char* argv[])
+{
+    DawnArgs args = { 0 };
+    args.theme = -1; // Not set
 
     // Reset getopt
     optind = 1;
@@ -90,51 +97,51 @@ DawnArgs args_parse(int32_t argc, char *argv[]) {
     int32_t opt;
     while ((opt = getopt(argc, argv, short_opts)) != -1) {
         switch (opt) {
-            case 'd':
-                args.flags |= ARG_DEMO;
-                args.demo_file = resolve_path(optarg);
-                break;
+        case 'd':
+            args.flags |= ARG_DEMO;
+            args.demo_file = resolve_path(optarg);
+            break;
 
-            case 't':
-                args.theme = parse_theme(optarg);
-                if (args.theme < 0) {
-                    args.flags |= ARG_ERROR;
-                    args.error_msg = "Invalid theme (use 'light' or 'dark')";
-                }
-                break;
-
-            case 'p':
-                args.flags |= ARG_PREVIEW;
-                args.file = resolve_path(optarg);
-                break;
-
-            case 'P':
-                args.flags |= ARG_PRINT;
-                break;
-
-            case 'h':
-                args.flags |= ARG_HELP;
-                break;
-
-            case 'v':
-                args.flags |= ARG_VERSION;
-                break;
-
-            case '?':
+        case 't':
+            args.theme = parse_theme(optarg);
+            if (args.theme < 0) {
                 args.flags |= ARG_ERROR;
-                args.error_msg = "Unknown option";
-                break;
+                args.error_msg = "Invalid theme (use 'light' or 'dark')";
+            }
+            break;
 
-            case ':':
-                args.flags |= ARG_ERROR;
-                args.error_msg = "Missing argument";
-                break;
+        case 'p':
+            args.flags |= ARG_PREVIEW;
+            args.file = resolve_path(optarg);
+            break;
+
+        case 'P':
+            args.flags |= ARG_PRINT;
+            break;
+
+        case 'h':
+            args.flags |= ARG_HELP;
+            break;
+
+        case 'v':
+            args.flags |= ARG_VERSION;
+            break;
+
+        case '?':
+            args.flags |= ARG_ERROR;
+            args.error_msg = "Unknown option";
+            break;
+
+        case ':':
+            args.flags |= ARG_ERROR;
+            args.error_msg = "Missing argument";
+            break;
         }
     }
 
     // Process operands (after options, or after --)
     while (optind < argc) {
-        const char *operand = argv[optind++];
+        const char* operand = argv[optind++];
 
         // "-" means stdin
         if (strcmp(operand, "-") == 0) {
@@ -191,15 +198,18 @@ DawnArgs args_parse(int32_t argc, char *argv[]) {
     return args;
 }
 
-void args_free(DawnArgs *args) {
-    if (!args) return;
+void args_free(DawnArgs* args)
+{
+    if (!args)
+        return;
     free(args->file);
     free(args->demo_file);
     args->file = NULL;
     args->demo_file = NULL;
 }
 
-void args_print_usage(const char *program_name) {
+void args_print_usage(const char* program_name)
+{
     fprintf(stderr,
         "Usage: %s [options] [file | -]\n"
         "\n"
@@ -234,12 +244,14 @@ void args_print_usage(const char *program_name) {
         program_name, program_name, program_name, program_name, program_name);
 }
 
-void args_print_version(void) {
+void args_print_version(void)
+{
     printf("%s %s\n", APP_NAME, VERSION);
     printf("%s\n", APP_TAGLINE);
 }
 
-bool args_stdin_has_data(void) {
+bool args_stdin_has_data(void)
+{
     // Check if stdin is a terminal
     if (isatty(STDIN_FILENO)) {
         return false;
@@ -247,7 +259,7 @@ bool args_stdin_has_data(void) {
 
     // Check if there's data available
     fd_set fds;
-    struct timeval tv = {0, 0};
+    struct timeval tv = { 0, 0 };
 
     FD_ZERO(&fds);
     FD_SET(STDIN_FILENO, &fds);
@@ -255,15 +267,18 @@ bool args_stdin_has_data(void) {
     return select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) > 0;
 }
 
-char *args_read_stdin(size_t *out_size) {
-    if (!out_size) return NULL;
+char* args_read_stdin(size_t* out_size)
+{
+    if (!out_size)
+        return NULL;
     *out_size = 0;
 
     // Initial buffer
     size_t capacity = 4096;
     size_t size = 0;
-    char *buf = malloc(capacity);
-    if (!buf) return NULL;
+    char* buf = malloc(capacity);
+    if (!buf)
+        return NULL;
 
     // Read all of stdin
     char chunk[4096];
@@ -272,7 +287,7 @@ char *args_read_stdin(size_t *out_size) {
         // Grow buffer if needed
         if (size + n + 1 > capacity) {
             capacity = (size + n + 1) * 2;
-            char *newbuf = realloc(buf, capacity);
+            char* newbuf = realloc(buf, capacity);
             if (!newbuf) {
                 free(buf);
                 return NULL;

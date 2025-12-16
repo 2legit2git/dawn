@@ -7,15 +7,16 @@
 #include "dawn_app.h"
 #include "dawn_backend.h"
 #include "dawn_types.h"
-#include <stdio.h>
-#include <stdlib.h>
 #include <emscripten.h>
 #include <emscripten/html5.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 extern const DawnBackend dawn_backend_web;
 
 // Frame callback for requestAnimationFrame loop
-static void main_loop(void) {
+static void main_loop(void)
+{
     if (!dawn_frame()) {
         // App wants to quit
         emscripten_cancel_main_loop();
@@ -26,13 +27,14 @@ static void main_loop(void) {
 
 // Called from JavaScript to load a file
 EMSCRIPTEN_KEEPALIVE
-void dawn_web_load_file(const char *content, size_t len, const char *filename) {
+void dawn_web_load_file(const char* content, size_t len, const char* filename)
+{
     // Save to virtual filesystem and load
     char path[256];
     snprintf(path, sizeof(path), "/dawn/%s", filename);
 
     // Write content to virtual FS
-    FILE *f = fopen(path, "w");
+    FILE* f = fopen(path, "w");
     if (f) {
         fwrite(content, 1, len, f);
         fclose(f);
@@ -42,24 +44,28 @@ void dawn_web_load_file(const char *content, size_t len, const char *filename) {
 
 // Called from JavaScript to create a new document
 EMSCRIPTEN_KEEPALIVE
-void dawn_web_new_document(void) {
+void dawn_web_new_document(void)
+{
     dawn_new_document();
 }
 
 // Called from JavaScript to save the current document
 EMSCRIPTEN_KEEPALIVE
-void dawn_web_save(void) {
+void dawn_web_save(void)
+{
     dawn_save_document();
 }
 
 // Called from JavaScript to set the theme
 EMSCRIPTEN_KEEPALIVE
-void dawn_web_set_theme(int32_t dark) {
+void dawn_web_set_theme(int32_t dark)
+{
     // Theme is set at init, would need to add a runtime theme change API
     (void)dark;
 }
 
-int32_t main(int32_t argc, char *argv[]) {
+int32_t main(int32_t argc, char* argv[])
+{
     (void)argc;
     (void)argv;
 

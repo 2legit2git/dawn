@@ -9,16 +9,16 @@
 // #region FZF-Style Fuzzy Matching
 
 // Scoring constants (from fzf)
-#define SCORE_MATCH           16
-#define SCORE_GAP_START       -3
-#define SCORE_GAP_EXTENSION   -1
-#define BONUS_BOUNDARY        (SCORE_MATCH / 2)   // 8
-#define BONUS_NON_WORD        (SCORE_MATCH / 2)   // 8
-#define BONUS_CAMEL           (BONUS_BOUNDARY + SCORE_GAP_EXTENSION)  // 7
-#define BONUS_CONSECUTIVE     (-(SCORE_GAP_START + SCORE_GAP_EXTENSION))  // 4
+#define SCORE_MATCH 16
+#define SCORE_GAP_START -3
+#define SCORE_GAP_EXTENSION -1
+#define BONUS_BOUNDARY (SCORE_MATCH / 2) // 8
+#define BONUS_NON_WORD (SCORE_MATCH / 2) // 8
+#define BONUS_CAMEL (BONUS_BOUNDARY + SCORE_GAP_EXTENSION) // 7
+#define BONUS_CONSECUTIVE (-(SCORE_GAP_START + SCORE_GAP_EXTENSION)) // 4
 #define BONUS_FIRST_CHAR_MULT 2
-#define BONUS_BOUNDARY_WHITE  (BONUS_BOUNDARY + 2)  // 10
-#define BONUS_BOUNDARY_DELIM  (BONUS_BOUNDARY + 1)  // 9
+#define BONUS_BOUNDARY_WHITE (BONUS_BOUNDARY + 2) // 10
+#define BONUS_BOUNDARY_DELIM (BONUS_BOUNDARY + 1) // 9
 
 //! Character class for bonus calculation
 DAWN_ENUM(uint8_t) {
@@ -32,35 +32,42 @@ DAWN_ENUM(uint8_t) {
 } CharClass;
 
 //! Get character class
-static CharClass char_class_of(char c) {
-    if (ISLOWER_(c)) return CHAR_LOWER;
-    if (ISUPPER_(c)) return CHAR_UPPER;
-    if (ISDIGIT_(c)) return CHAR_NUMBER;
-    if (ISSPACE_(c)) return CHAR_WHITE;
-    if (c == '/' || c == ',' || c == ':' || c == ';' || c == '|') return CHAR_DELIMITER;
-    if (c == '_' || c == '-') return CHAR_DELIMITER;
+static CharClass char_class_of(char c)
+{
+    if (ISLOWER_(c))
+        return CHAR_LOWER;
+    if (ISUPPER_(c))
+        return CHAR_UPPER;
+    if (ISDIGIT_(c))
+        return CHAR_NUMBER;
+    if (ISSPACE_(c))
+        return CHAR_WHITE;
+    if (c == '/' || c == ',' || c == ':' || c == ';' || c == '|')
+        return CHAR_DELIMITER;
+    if (c == '_' || c == '-')
+        return CHAR_DELIMITER;
     return CHAR_NON_WORD;
 }
 
 //! Calculate bonus for transition between character classes
-static int32_t bonus_for(CharClass prev_class, CharClass curr_class) {
+static int32_t bonus_for(CharClass prev_class, CharClass curr_class)
+{
     // Word character after boundary
     if (curr_class > CHAR_NON_WORD) {
         switch (prev_class) {
-            case CHAR_WHITE:
-                return BONUS_BOUNDARY_WHITE;
-            case CHAR_DELIMITER:
-                return BONUS_BOUNDARY_DELIM;
-            case CHAR_NON_WORD:
-                return BONUS_BOUNDARY;
-            default:
-                break;
+        case CHAR_WHITE:
+            return BONUS_BOUNDARY_WHITE;
+        case CHAR_DELIMITER:
+            return BONUS_BOUNDARY_DELIM;
+        case CHAR_NON_WORD:
+            return BONUS_BOUNDARY;
+        default:
+            break;
         }
     }
 
     // camelCase or letter123 transition
-    if ((prev_class == CHAR_LOWER && curr_class == CHAR_UPPER) ||
-        (prev_class != CHAR_NUMBER && curr_class == CHAR_NUMBER)) {
+    if ((prev_class == CHAR_LOWER && curr_class == CHAR_UPPER) || (prev_class != CHAR_NUMBER && curr_class == CHAR_NUMBER)) {
         return BONUS_CAMEL;
     }
 
@@ -77,27 +84,31 @@ static int32_t bonus_for(CharClass prev_class, CharClass curr_class) {
 
 //! FZF V1-style fuzzy match with scoring
 //! Returns score (0 = no match, higher = better)
-static int32_t fuzzy_match(const char *pattern, int32_t plen, const char *text, int32_t tlen) {
-    if (plen == 0) return 1;  // Empty pattern matches everything
+static int32_t fuzzy_match(const char* pattern, int32_t plen, const char* text, int32_t tlen)
+{
+    if (plen == 0)
+        return 1; // Empty pattern matches everything
 
     // Forward pass: find first occurrence of pattern
     int32_t pidx = 0;
-    int32_t sidx = -1;  // Start index
-    int32_t eidx = -1;  // End index
+    int32_t sidx = -1; // Start index
+    int32_t eidx = -1; // End index
 
     for (int32_t idx = 0; idx < tlen && pidx < plen; idx++) {
         char pc = TOLOWER_(pattern[pidx]);
         char tc = TOLOWER_(text[idx]);
 
         if (pc == tc) {
-            if (sidx < 0) sidx = idx;
+            if (sidx < 0)
+                sidx = idx;
             eidx = idx;
             pidx++;
         }
     }
 
     // No match if we didn't find all pattern chars
-    if (pidx != plen) return 0;
+    if (pidx != plen)
+        return 0;
 
     // Backward pass: find shorter match
     pidx = plen - 1;
@@ -108,7 +119,8 @@ static int32_t fuzzy_match(const char *pattern, int32_t plen, const char *text, 
         char tc = TOLOWER_(text[idx]);
 
         if (pc == tc) {
-            if (pidx == plen - 1) best_end = idx;
+            if (pidx == plen - 1)
+                best_end = idx;
             pidx--;
         }
     }
@@ -142,8 +154,10 @@ static int32_t fuzzy_match(const char *pattern, int32_t plen, const char *text, 
                     first_bonus = bonus;
                 }
                 // Use max of current bonus, first_bonus, or consecutive bonus
-                if (first_bonus > bonus) bonus = first_bonus;
-                if (BONUS_CONSECUTIVE > bonus) bonus = BONUS_CONSECUTIVE;
+                if (first_bonus > bonus)
+                    bonus = first_bonus;
+                if (BONUS_CONSECUTIVE > bonus)
+                    bonus = BONUS_CONSECUTIVE;
             }
 
             if (pidx == 0) {
@@ -170,26 +184,29 @@ static int32_t fuzzy_match(const char *pattern, int32_t plen, const char *text, 
         prev_class = curr_class;
     }
 
-    return score > 0 ? score : 1;  // Ensure positive score for matches
+    return score > 0 ? score : 1; // Ensure positive score for matches
 }
 
 // #endregion
 
 // #region TOC Building
 
-void toc_init(TocState *state) {
+void toc_init(TocState* state)
+{
     memset(state, 0, sizeof(TocState));
     state->filtered = malloc(TOC_MAX_ENTRIES * sizeof(int32_t));
 }
 
-void toc_free(TocState *state) {
+void toc_free(TocState* state)
+{
     if (state->filtered) {
         free(state->filtered);
         state->filtered = NULL;
     }
 }
 
-void toc_build(const GapBuffer *gb, TocState *state) {
+void toc_build(const GapBuffer* gb, TocState* state)
+{
     state->count = 0;
     size_t len = gap_len(gb);
     size_t pos = 0;
@@ -202,16 +219,20 @@ void toc_build(const GapBuffer *gb, TocState *state) {
         MdSpan lang;
         if (md_check_code_fence(gb, pos, &lang)) {
             in_code_block = !in_code_block;
-            while (pos < len && gap_at(gb, pos) != '\n') pos++;
-            if (pos < len) pos++;
+            while (pos < len && gap_at(gb, pos) != '\n')
+                pos++;
+            if (pos < len)
+                pos++;
             continue;
         }
 
         MdMatch math;
         if (md_check_block_math(gb, pos, &math)) {
             in_block_math = !in_block_math;
-            while (pos < len && gap_at(gb, pos) != '\n') pos++;
-            if (pos < len) pos++;
+            while (pos < len && gap_at(gb, pos) != '\n')
+                pos++;
+            if (pos < len)
+                pos++;
             continue;
         }
 
@@ -219,16 +240,23 @@ void toc_build(const GapBuffer *gb, TocState *state) {
             MdStyle header = md_check_header(gb, pos);
 
             if (header) {
-                TocEntry *entry = &state->entries[state->count];
+                TocEntry* entry = &state->entries[state->count];
                 entry->pos = pos;
 
-                if (header & MD_H1) entry->level = 1;
-                else if (header & MD_H2) entry->level = 2;
-                else if (header & MD_H3) entry->level = 3;
-                else if (header & MD_H4) entry->level = 4;
-                else if (header & MD_H5) entry->level = 5;
-                else if (header & MD_H6) entry->level = 6;
-                else entry->level = 1;
+                if (header & MD_H1)
+                    entry->level = 1;
+                else if (header & MD_H2)
+                    entry->level = 2;
+                else if (header & MD_H3)
+                    entry->level = 3;
+                else if (header & MD_H4)
+                    entry->level = 4;
+                else if (header & MD_H5)
+                    entry->level = 5;
+                else if (header & MD_H6)
+                    entry->level = 6;
+                else
+                    entry->level = 1;
 
                 size_t content_start;
                 md_check_header_content(gb, pos, &content_start);
@@ -237,7 +265,8 @@ void toc_build(const GapBuffer *gb, TocState *state) {
                 size_t p = content_start;
                 while (p < len && ti < TOC_MAX_HEADER_LEN - 1) {
                     char c = gap_at(gb, p);
-                    if (c == '\n') break;
+                    if (c == '\n')
+                        break;
                     if (c == '{' && p + 1 < len && gap_at(gb, p + 1) == '#') {
                         break;
                     }
@@ -258,19 +287,21 @@ void toc_build(const GapBuffer *gb, TocState *state) {
             }
         }
 
-        while (pos < len && gap_at(gb, pos) != '\n') pos++;
-        if (pos < len) pos++;
+        while (pos < len && gap_at(gb, pos) != '\n')
+            pos++;
+        if (pos < len)
+            pos++;
     }
 
     // Compute hierarchy depth for each entry using a stack of levels.
     // H1 followed by H2 means H2 is nested under H1.
     // H2 followed by H1 means H1 "pops" back to top level.
     if (state->count > 0) {
-        int32_t level_stack[7] = {0};
+        int32_t level_stack[7] = { 0 };
         int32_t stack_depth = 0;
 
         for (int32_t i = 0; i < state->count; i++) {
-            TocEntry *entry = &state->entries[i];
+            TocEntry* entry = &state->entries[i];
             int32_t level = entry->level;
 
             while (stack_depth > 0 && level_stack[stack_depth - 1] >= level) {
@@ -289,7 +320,8 @@ void toc_build(const GapBuffer *gb, TocState *state) {
     toc_filter(state);
 }
 
-void toc_filter(TocState *state) {
+void toc_filter(TocState* state)
+{
     state->filtered_count = 0;
 
     if (state->filter_len == 0) {
@@ -297,12 +329,15 @@ void toc_filter(TocState *state) {
             state->filtered[state->filtered_count++] = i;
         }
     } else {
-        typedef struct { int32_t idx; int32_t score; } scored_t;
+        typedef struct {
+            int32_t idx;
+            int32_t score;
+        } scored_t;
         scored_t scored[TOC_MAX_ENTRIES];
         int32_t scored_count = 0;
 
         for (int32_t i = 0; i < state->count; i++) {
-            TocEntry *e = &state->entries[i];
+            TocEntry* e = &state->entries[i];
             int32_t score = fuzzy_match(state->filter, state->filter_len, e->text, e->text_len);
             if (score > 0) {
                 scored[scored_count].idx = i;
@@ -332,8 +367,10 @@ void toc_filter(TocState *state) {
     state->scroll = 0;
 }
 
-const TocEntry *toc_get_selected(const TocState *state) {
-    if (state->filtered_count == 0) return NULL;
+const TocEntry* toc_get_selected(const TocState* state)
+{
+    if (state->filtered_count == 0)
+        return NULL;
     int32_t idx = state->filtered[state->selected];
     return &state->entries[idx];
 }

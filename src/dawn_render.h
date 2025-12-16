@@ -14,14 +14,14 @@ void render_clear(void);
 //! @param row display row (1-based)
 //! @param text text to display
 //! @param fg foreground color
-void render_center_text(int32_t row, const char *text, DawnColor fg);
+void render_center_text(int32_t row, const char* text, DawnColor fg);
 
 //! Render a floating popup box centered on screen
 //! @param width box width in columns
 //! @param height box height in rows
 //! @param out_top output: top-left row (1-based)
 //! @param out_left output: top-left column (1-based)
-void render_popup_box(int32_t width, int32_t height, int32_t *out_top, int32_t *out_left);
+void render_popup_box(int32_t width, int32_t height, int32_t* out_top, int32_t* out_left);
 
 // #endregion
 

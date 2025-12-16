@@ -10,7 +10,7 @@
 //! Add a message to the chat history
 //! @param text message content
 //! @param is_user true for user messages, false for AI responses
-void chat_add(const char *text, bool is_user);
+void chat_add(const char* text, bool is_user);
 
 //! Clear all chat messages and free memory
 void chat_clear(void);
@@ -27,7 +27,7 @@ void ai_init_session(void);
 
 //! Send a prompt to the AI and stream the response
 //! @param prompt user's input message
-void ai_send(const char *prompt);
+void ai_send(const char* prompt);
 
 // #endregion
 

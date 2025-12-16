@@ -3,17 +3,17 @@
 #ifndef DAWN_HISTORY_H
 #define DAWN_HISTORY_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 // #region Types
 
 //! History entry stored in JSON
 typedef struct {
-    char *path;         //!< Full path to .md file
-    char *title;        //!< Document title
-    int64_t created;    //!< Creation timestamp (seconds since epoch)
-    int64_t modified;   //!< Last modified timestamp
+    char* path; //!< Full path to .md file
+    char* title; //!< Document title
+    int64_t created; //!< Creation timestamp (seconds since epoch)
+    int64_t modified; //!< Last modified timestamp
 } HistEntry;
 
 // #endregion
@@ -38,17 +38,17 @@ void hist_free(void);
 //! @param path Full path to the document
 //! @param title Document title (can be NULL)
 //! @return true on success
-bool hist_upsert(const char *path, const char *title);
+bool hist_upsert(const char* path, const char* title);
 
 //! Remove an entry from history
 //! @param path Full path to remove
 //! @return true if entry was found and removed
-bool hist_remove(const char *path);
+bool hist_remove(const char* path);
 
 //! Find entry by path
 //! @param path Full path to find
 //! @return Pointer to entry, or NULL if not found
-HistEntry *hist_find(const char *path);
+HistEntry* hist_find(const char* path);
 
 // #endregion
 

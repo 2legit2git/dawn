@@ -2,9 +2,9 @@
 
 #include "dawn_utils.h"
 #include "dawn_gap.h"
-#include "dawn_wrap.h"
 #include "dawn_md.h"
 #include "dawn_theme.h"
+#include "dawn_wrap.h"
 
 //! Current text scale for output (1-7, 1=normal)
 int32_t current_text_scale = 1;
@@ -17,7 +17,8 @@ int32_t current_frac_denom = 0;
 
 // #region Path Utilities
 
-void get_chat_path(const char *session_path, char *chat_path, size_t bufsize) {
+void get_chat_path(const char* session_path, char* chat_path, size_t bufsize)
+{
     size_t len = strlen(session_path);
     if (len > 3 && strcmp(session_path + len - 3, ".md") == 0) {
         // Replace .md with .chat.json
@@ -32,14 +33,16 @@ void get_chat_path(const char *session_path, char *chat_path, size_t bufsize) {
 
 // #region Text Utilities
 
-size_t normalize_line_endings(char *buf, size_t len) {
+size_t normalize_line_endings(char* buf, size_t len)
+{
     size_t read = 0, write = 0;
     while (read < len) {
         if (buf[read] == '\r') {
             // CRLF -> LF, or standalone CR -> LF
             buf[write++] = '\n';
             read++;
-            if (read < len && buf[read] == '\n') read++;  // skip LF after CR
+            if (read < len && buf[read] == '\n')
+                read++; // skip LF after CR
         } else {
             buf[write++] = buf[read++];
         }
@@ -49,16 +52,18 @@ size_t normalize_line_endings(char *buf, size_t len) {
 
 // Word count cache - avoids rescanning entire document every frame
 static struct {
-    int32_t count;          // Cached word count
-    size_t text_len;    // Text length when cache was computed
-    bool valid;         // Cache validity
-} word_cache = {0, 0, false};
+    int32_t count; // Cached word count
+    size_t text_len; // Text length when cache was computed
+    bool valid; // Cache validity
+} word_cache = { 0, 0, false };
 
-void word_count_invalidate(void) {
+void word_count_invalidate(void)
+{
     word_cache.valid = false;
 }
 
-int32_t count_words(const GapBuffer *gb) {
+int32_t count_words(const GapBuffer* gb)
+{
     size_t len = gap_len(gb);
 
     // Check if cache is valid
@@ -92,23 +97,25 @@ int32_t count_words(const GapBuffer *gb) {
 
 // #region Grapheme Output
 
-int32_t output_grapheme(const GapBuffer *gb, size_t *pos, MdStyle active_style) {
+int32_t output_grapheme(const GapBuffer* gb, size_t* pos, MdStyle active_style)
+{
     size_t len = gap_len(gb);
-    if (*pos >= len) return 0;
+    if (*pos >= len)
+        return 0;
 
     // Determine if we need any scaling
     bool needs_scaling = (current_text_scale > 1 || (current_frac_num > 0 && current_frac_denom > 0))
-                         && dawn_ctx_has(&app.ctx, DAWN_CAP_TEXT_SIZING);
+        && dawn_ctx_has(&app.ctx, DAWN_CAP_TEXT_SIZING);
     bool has_frac = (current_frac_num > 0 && current_frac_denom > current_frac_num);
 
     // Check for typographic replacements first (skipped inside inline code)
     size_t consumed = 0;
-    const char *replacement = md_check_typo_replacement(gb, *pos, &consumed, active_style);
+    const char* replacement = md_check_typo_replacement(gb, *pos, &consumed, active_style);
     if (replacement) {
         if (needs_scaling) {
             if (has_frac) {
                 print_scaled_frac_str(replacement, strlen(replacement),
-                                      current_text_scale, current_frac_num, current_frac_denom);
+                    current_text_scale, current_frac_num, current_frac_denom);
             } else {
                 print_scaled_str(replacement, strlen(replacement), current_text_scale);
             }
@@ -144,7 +151,8 @@ int32_t output_grapheme(const GapBuffer *gb, size_t *pos, MdStyle active_style) 
     // Multi-byte UTF-8: collect bytes
     uint8_t bytes[8];
     int32_t expected = utf8proc_utf8class[(uint8_t)first];
-    if (expected < 1) expected = 1;
+    if (expected < 1)
+        expected = 1;
 
     int32_t n = 0;
     size_t bytepos = *pos;
@@ -158,27 +166,30 @@ int32_t output_grapheme(const GapBuffer *gb, size_t *pos, MdStyle active_style) 
     utf8proc_int32_t codepoint;
     utf8proc_iterate(bytes, n, &codepoint);
     int32_t width = utf8proc_charwidth(codepoint);
-    if (width < 0) width = 1;
+    if (width < 0)
+        width = 1;
 
     // Output the bytes with text sizing if needed
     if (needs_scaling) {
         if (has_frac) {
-            print_scaled_frac_str((const char *)bytes, (size_t)n,
-                                  current_text_scale, current_frac_num, current_frac_denom);
+            print_scaled_frac_str((const char*)bytes, (size_t)n,
+                current_text_scale, current_frac_num, current_frac_denom);
         } else {
-            print_scaled_str((const char *)bytes, (size_t)n, current_text_scale);
+            print_scaled_str((const char*)bytes, (size_t)n, current_text_scale);
         }
         *pos += (size_t)n;
         return width * current_text_scale;
     } else {
-        DAWN_BACKEND(app)->write_str((const char *)bytes, (size_t)n);
+        DAWN_BACKEND(app)->write_str((const char*)bytes, (size_t)n);
         *pos += (size_t)n;
         return width;
     }
 }
 
-int32_t output_grapheme_str(const char *text, size_t len, size_t *pos) {
-    if (*pos >= len) return 0;
+int32_t output_grapheme_str(const char* text, size_t len, size_t* pos)
+{
+    if (*pos >= len)
+        return 0;
 
     uint8_t first = (uint8_t)text[*pos];
 
@@ -191,14 +202,17 @@ int32_t output_grapheme_str(const char *text, size_t len, size_t *pos) {
 
     // Multi-byte UTF-8
     int32_t n = utf8proc_utf8class[first];
-    if (n < 1) n = 1;
-    if (*pos + (size_t)n > len) n = (int32_t)(len - *pos);
+    if (n < 1)
+        n = 1;
+    if (*pos + (size_t)n > len)
+        n = (int32_t)(len - *pos);
 
     // Get width
     utf8proc_int32_t codepoint;
-    utf8proc_iterate((const utf8proc_uint8_t *)&text[*pos], n, &codepoint);
+    utf8proc_iterate((const utf8proc_uint8_t*)&text[*pos], n, &codepoint);
     int32_t width = utf8proc_charwidth(codepoint);
-    if (width < 0) width = 1;
+    if (width < 0)
+        width = 1;
 
     // Output
     DAWN_BACKEND(app)->write_str(&text[*pos], (size_t)n);
@@ -211,9 +225,12 @@ int32_t output_grapheme_str(const char *text, size_t len, size_t *pos) {
 
 // #region Text Wrapping
 
-int32_t chat_wrap_line(const char *text, size_t len, size_t start, int32_t width) {
-    if (start >= len) return 0;
-    if (text[start] == '\n') return -1;
+int32_t chat_wrap_line(const char* text, size_t len, size_t start, int32_t width)
+{
+    if (start >= len)
+        return 0;
+    if (text[start] == '\n')
+        return -1;
 
     int32_t col = 0;
     size_t pos = start;
@@ -221,14 +238,20 @@ int32_t chat_wrap_line(const char *text, size_t len, size_t start, int32_t width
 
     while (pos < len) {
         utf8proc_int32_t cp;
-        utf8proc_ssize_t bytes = utf8proc_iterate((const utf8proc_uint8_t *)&text[pos], len - pos, &cp);
-        if (bytes <= 0) { pos++; continue; }
+        utf8proc_ssize_t bytes = utf8proc_iterate((const utf8proc_uint8_t*)&text[pos], len - pos, &cp);
+        if (bytes <= 0) {
+            pos++;
+            continue;
+        }
 
-        if (cp == '\n') return (int32_t)(pos - start);
+        if (cp == '\n')
+            return (int32_t)(pos - start);
 
         int32_t gw = utf8proc_charwidth(cp);
-        if (gw < 0) gw = 1;
-        if (gw == 0) gw = 1;
+        if (gw < 0)
+            gw = 1;
+        if (gw == 0)
+            gw = 1;
 
         if (col + gw > width && col > 0) {
             if (last_break > start) {

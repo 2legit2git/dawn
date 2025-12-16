@@ -9,24 +9,24 @@
 #include "dawn_backend.h"
 #include "dawn_wrap.h"
 
+#include <assert.h>
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <pwd.h>
+#include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <termios.h>
 #include <sys/ioctl.h>
-#include <sys/stat.h>
 #include <sys/select.h>
+#include <sys/stat.h>
 #include <sys/types.h>
-#include <signal.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <dirent.h>
+#include <termios.h>
 #include <time.h>
-#include <pwd.h>
-#include <stdarg.h>
-#include <limits.h>
-#include <assert.h>
+#include <unistd.h>
 
 #include <curl/curl.h>
 
@@ -47,50 +47,48 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
-
 #define ESC "\x1b"
 #define CSI ESC "["
 
-#define CLEAR_SCREEN      CSI "2J"
-#define CLEAR_LINE        CSI "2K"
-#define CURSOR_HOME       CSI "H"
-#define CURSOR_HIDE       CSI "?25l"
-#define CURSOR_SHOW       CSI "?25h"
+#define CLEAR_SCREEN CSI "2J"
+#define CLEAR_LINE CSI "2K"
+#define CURSOR_HOME CSI "H"
+#define CURSOR_HIDE CSI "?25l"
+#define CURSOR_SHOW CSI "?25h"
 
-#define ALT_SCREEN_ON     CSI "?1049h"
-#define ALT_SCREEN_OFF    CSI "?1049l"
+#define ALT_SCREEN_ON CSI "?1049h"
+#define ALT_SCREEN_OFF CSI "?1049l"
 
-#define MOUSE_ON          CSI "?1000h" CSI "?1006h"
-#define MOUSE_OFF         CSI "?1000l" CSI "?1006l"
+#define MOUSE_ON CSI "?1000h" CSI "?1006h"
+#define MOUSE_OFF CSI "?1000l" CSI "?1006l"
 
-#define BRACKETED_PASTE_ON  CSI "?2004h"
+#define BRACKETED_PASTE_ON CSI "?2004h"
 #define BRACKETED_PASTE_OFF CSI "?2004l"
 
-#define SYNC_START        CSI "?2026h"
-#define SYNC_END          CSI "?2026l"
+#define SYNC_START CSI "?2026h"
+#define SYNC_END CSI "?2026l"
 
-#define KITTY_KBD_PUSH    CSI ">1u"
-#define KITTY_KBD_POP     CSI "<u"
+#define KITTY_KBD_PUSH CSI ">1u"
+#define KITTY_KBD_POP CSI "<u"
 
-#define UNDERLINE_CURLY   CSI "4:3m"
-#define UNDERLINE_DOTTED  CSI "4:4m"
-#define UNDERLINE_DASHED  CSI "4:5m"
-#define UNDERLINE_OFF     CSI "4:0m"
+#define UNDERLINE_CURLY CSI "4:3m"
+#define UNDERLINE_DOTTED CSI "4:4m"
+#define UNDERLINE_DASHED CSI "4:5m"
+#define UNDERLINE_OFF CSI "4:0m"
 
-#define TEXT_SIZE_OSC     ESC "]66;"
-#define TEXT_SIZE_ST      ESC "\\"
+#define TEXT_SIZE_OSC ESC "]66;"
+#define TEXT_SIZE_ST ESC "\\"
 
-#define RESET             CSI "0m"
-#define BOLD              CSI "1m"
-#define DIM               CSI "2m"
-#define ITALIC            CSI "3m"
-#define UNDERLINE         CSI "4m"
-#define STRIKETHROUGH     CSI "9m"
-
+#define RESET CSI "0m"
+#define BOLD CSI "1m"
+#define DIM CSI "2m"
+#define ITALIC CSI "3m"
+#define UNDERLINE CSI "4m"
+#define STRIKETHROUGH CSI "9m"
 
 // Output buffer for batching terminal writes
-#define OUTPUT_BUF_SIZE (256 * 1024)  // 256KB buffer
-static char *output_buf = NULL;
+#define OUTPUT_BUF_SIZE (256 * 1024) // 256KB buffer
+static char* output_buf = NULL;
 static size_t output_buf_pos = 0;
 
 static struct {
@@ -105,22 +103,24 @@ static struct {
     volatile sig_atomic_t resize_needed;
     volatile sig_atomic_t quit_requested;
     bool kitty_keyboard_enabled;
-    DawnMode mode;  //!< Interactive or print mode
-    int32_t tty_fd;         //!< File descriptor for terminal queries in print mode (-1 if not used)
-    int32_t print_row;      //!< Current output row in print mode (1-indexed)
-    int32_t print_col;      //!< Current output column in print mode (1-indexed)
-    DawnColor *print_bg;  //!< Default background for print mode margins (NULL if not set)
-} posix_state = {0};
+    DawnMode mode; //!< Interactive or print mode
+    int32_t tty_fd; //!< File descriptor for terminal queries in print mode (-1 if not used)
+    int32_t print_row; //!< Current output row in print mode (1-indexed)
+    int32_t print_col; //!< Current output column in print mode (1-indexed)
+    DawnColor* print_bg; //!< Default background for print mode margins (NULL if not set)
+} posix_state = { 0 };
 
 // Fast output buffer append
-static inline void buf_flush(void) {
+static inline void buf_flush(void)
+{
     if (output_buf_pos > 0) {
         fwrite(output_buf, 1, output_buf_pos, stdout);
         output_buf_pos = 0;
     }
 }
 
-static inline void buf_append(const char *s, size_t len) {
+static inline void buf_append(const char* s, size_t len)
+{
     if (output_buf_pos + len > OUTPUT_BUF_SIZE) {
         buf_flush();
         if (len > OUTPUT_BUF_SIZE) {
@@ -133,11 +133,13 @@ static inline void buf_append(const char *s, size_t len) {
     output_buf_pos += len;
 }
 
-static inline void buf_append_str(const char *s) {
+static inline void buf_append_str(const char* s)
+{
     buf_append(s, strlen(s));
 }
 
-static inline void buf_append_char(char c) {
+static inline void buf_append_char(char c)
+{
     if (output_buf_pos >= OUTPUT_BUF_SIZE) {
         buf_flush();
     }
@@ -145,7 +147,8 @@ static inline void buf_append_char(char c) {
 }
 
 // Format number into buffer, returns length
-static inline int32_t format_num(char *buf, int32_t n) {
+static inline int32_t format_num(char* buf, int32_t n)
+{
     if (n < 10) {
         buf[0] = '0' + n;
         return 1;
@@ -168,8 +171,9 @@ static inline int32_t format_num(char *buf, int32_t n) {
 }
 
 // Buffered printf-style output (slow path, avoid in hot loops)
-static void buf_printf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
-static void buf_printf(const char *fmt, ...) {
+static void buf_printf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+static void buf_printf(const char* fmt, ...)
+{
     char tmp[512];
     va_list args;
     va_start(args, fmt);
@@ -184,7 +188,8 @@ static void buf_printf(const char *fmt, ...) {
 static inline void buf_bg(uint8_t r, uint8_t g, uint8_t b);
 
 // Fast path: cursor positioning - \x1b[row;colH
-static inline void buf_cursor(int32_t row, int32_t col) {
+static inline void buf_cursor(int32_t row, int32_t col)
+{
     // In print mode, use streaming output (newlines) instead of absolute positioning
     if (posix_state.mode == DAWN_MODE_PRINT) {
         // Advance rows with newlines
@@ -230,11 +235,17 @@ static inline void buf_cursor(int32_t row, int32_t col) {
 }
 
 // Fast path: foreground color - \x1b[38;2;r;g;bm
-static inline void buf_fg(uint8_t r, uint8_t g, uint8_t b) {
+static inline void buf_fg(uint8_t r, uint8_t g, uint8_t b)
+{
     char seq[24];
     // \x1b[38;2;
-    seq[0] = '\x1b'; seq[1] = '['; seq[2] = '3'; seq[3] = '8';
-    seq[4] = ';'; seq[5] = '2'; seq[6] = ';';
+    seq[0] = '\x1b';
+    seq[1] = '[';
+    seq[2] = '3';
+    seq[3] = '8';
+    seq[4] = ';';
+    seq[5] = '2';
+    seq[6] = ';';
     int32_t pos = 7;
     pos += format_num(seq + pos, r);
     seq[pos++] = ';';
@@ -246,11 +257,17 @@ static inline void buf_fg(uint8_t r, uint8_t g, uint8_t b) {
 }
 
 // Fast path: background color - \x1b[48;2;r;g;bm
-static inline void buf_bg(uint8_t r, uint8_t g, uint8_t b) {
+static inline void buf_bg(uint8_t r, uint8_t g, uint8_t b)
+{
     char seq[24];
     // \x1b[48;2;
-    seq[0] = '\x1b'; seq[1] = '['; seq[2] = '4'; seq[3] = '8';
-    seq[4] = ';'; seq[5] = '2'; seq[6] = ';';
+    seq[0] = '\x1b';
+    seq[1] = '[';
+    seq[2] = '4';
+    seq[3] = '8';
+    seq[4] = ';';
+    seq[5] = '2';
+    seq[6] = ';';
     int32_t pos = 7;
     pos += format_num(seq + pos, r);
     seq[pos++] = ';';
@@ -262,11 +279,18 @@ static inline void buf_bg(uint8_t r, uint8_t g, uint8_t b) {
 }
 
 // Fast path: underline color - \x1b[58:2::r:g:bm
-static inline void buf_underline_color(uint8_t r, uint8_t g, uint8_t b) {
+static inline void buf_underline_color(uint8_t r, uint8_t g, uint8_t b)
+{
     char seq[24];
     // \x1b[58:2::
-    seq[0] = '\x1b'; seq[1] = '['; seq[2] = '5'; seq[3] = '8';
-    seq[4] = ':'; seq[5] = '2'; seq[6] = ':'; seq[7] = ':';
+    seq[0] = '\x1b';
+    seq[1] = '[';
+    seq[2] = '5';
+    seq[3] = '8';
+    seq[4] = ':';
+    seq[5] = '2';
+    seq[6] = ':';
+    seq[7] = ':';
     int32_t pos = 8;
     pos += format_num(seq + pos, r);
     seq[pos++] = ':';
@@ -279,7 +303,7 @@ static inline void buf_underline_color(uint8_t r, uint8_t g, uint8_t b) {
 
 // Image cache for Kitty graphics protocol
 typedef struct {
-    char *path;
+    char* path;
     uint32_t image_id;
     int64_t mtime;
 } TransmittedImage;
@@ -292,29 +316,31 @@ static uint32_t next_image_id = 1;
 // Forward declarations
 static int32_t posix_image_calc_rows(int32_t pixel_width, int32_t pixel_height, int32_t max_cols, int32_t max_rows);
 
-
-static void handle_sigwinch(int32_t sig) {
+static void handle_sigwinch(int32_t sig)
+{
     (void)sig;
     posix_state.resize_needed = 1;
 }
 
-static void handle_sigterm(int32_t sig) {
+static void handle_sigterm(int32_t sig)
+{
     (void)sig;
     posix_state.quit_requested = 1;
 }
 
-
 //! Get the file descriptor for terminal queries
 //! In interactive mode: stdout/stdin
 //! In print mode: tty_fd (stderr or /dev/tty)
-static inline int32_t get_query_write_fd(void) {
+static inline int32_t get_query_write_fd(void)
+{
     if (posix_state.mode == DAWN_MODE_PRINT && posix_state.tty_fd >= 0) {
         return posix_state.tty_fd;
     }
     return STDOUT_FILENO;
 }
 
-static inline int32_t get_query_read_fd(void) {
+static inline int32_t get_query_read_fd(void)
+{
     if (posix_state.mode == DAWN_MODE_PRINT && posix_state.tty_fd >= 0) {
         return posix_state.tty_fd;
     }
@@ -322,7 +348,8 @@ static inline int32_t get_query_read_fd(void) {
 }
 
 //! Write query to terminal (uses tty_fd in print mode)
-static void query_write(const char *data, size_t len) {
+static void query_write(const char* data, size_t len)
+{
     int32_t fd = get_query_write_fd();
     ssize_t n = write(fd, data, len);
     (void)n;
@@ -332,8 +359,9 @@ static void query_write(const char *data, size_t len) {
     }
 }
 
-static void query_printf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
-static void query_printf(const char *fmt, ...) {
+static void query_printf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+static void query_printf(const char* fmt, ...)
+{
     char tmp[512];
     va_list args;
     va_start(args, fmt);
@@ -344,37 +372,45 @@ static void query_printf(const char *fmt, ...) {
     }
 }
 
-static void drain_input(void) {
+static void drain_input(void)
+{
     int32_t fd = get_query_read_fd();
     fd_set fds;
-    struct timeval tv = {0, 1000};
+    struct timeval tv = { 0, 1000 };
     char c;
 
     while (1) {
         FD_ZERO(&fds);
         FD_SET(fd, &fds);
-        if (select(fd + 1, &fds, NULL, NULL, &tv) <= 0) break;
-        if (read(fd, &c, 1) != 1) break;
+        if (select(fd + 1, &fds, NULL, NULL, &tv) <= 0)
+            break;
+        if (read(fd, &c, 1) != 1)
+            break;
     }
 }
 
-static size_t read_response(char *buf, size_t buf_size, char terminator, int32_t timeout_ms) {
+static size_t read_response(char* buf, size_t buf_size, char terminator, int32_t timeout_ms)
+{
     int32_t fd = get_query_read_fd();
     size_t pos = 0;
     fd_set fds;
-    struct timeval tv = {timeout_ms / 1000, (timeout_ms % 1000) * 1000};
+    struct timeval tv = { timeout_ms / 1000, (timeout_ms % 1000) * 1000 };
 
     while (pos < buf_size - 1) {
         FD_ZERO(&fds);
         FD_SET(fd, &fds);
-        if (select(fd + 1, &fds, NULL, NULL, &tv) <= 0) break;
+        if (select(fd + 1, &fds, NULL, NULL, &tv) <= 0)
+            break;
 
         char c;
-        if (read(fd, &c, 1) != 1) break;
+        if (read(fd, &c, 1) != 1)
+            break;
         buf[pos++] = c;
 
-        if (c == terminator) break;
-        if (pos >= 2 && buf[pos-2] == '\x1b' && c == '\\') break;
+        if (c == terminator)
+            break;
+        if (pos >= 2 && buf[pos - 2] == '\x1b' && c == '\\')
+            break;
 
         tv.tv_sec = 0;
         tv.tv_usec = 10000;
@@ -383,20 +419,23 @@ static size_t read_response(char *buf, size_t buf_size, char terminator, int32_t
     return pos;
 }
 
-static bool query_mode_supported(int32_t mode) {
+static bool query_mode_supported(int32_t mode)
+{
     query_printf(CSI "?%d$p", mode);
 
     char buf[32];
     size_t len = read_response(buf, sizeof(buf), 'y', 100);
 
     if (len > 0 && strstr(buf, "$y")) {
-        char *semi = strchr(buf, ';');
-        if (semi && semi[1] != '0') return true;
+        char* semi = strchr(buf, ';');
+        if (semi && semi[1] != '0')
+            return true;
     }
     return false;
 }
 
-static bool query_kitty_keyboard(void) {
+static bool query_kitty_keyboard(void)
+{
     query_write(CSI "?u", sizeof(CSI "?u") - 1);
 
     char buf[32];
@@ -404,23 +443,28 @@ static bool query_kitty_keyboard(void) {
     return len > 0 && strchr(buf, '?') != NULL;
 }
 
-static bool query_kitty_graphics(void) {
+static bool query_kitty_graphics(void)
+{
     query_write(ESC "_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA" ESC "\\",
-                sizeof(ESC "_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA" ESC "\\") - 1);
+        sizeof(ESC "_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA" ESC "\\") - 1);
 
     char buf[64];
     size_t len = read_response(buf, sizeof(buf), '\\', 100);
     return len > 0 && strstr(buf, "OK") != NULL;
 }
 
-static bool parse_cpr(const char *buf, size_t len, int32_t *row, int32_t *col) {
-    if (len < 6) return false;
+static bool parse_cpr(const char* buf, size_t len, int32_t* row, int32_t* col)
+{
+    if (len < 6)
+        return false;
 
-    const char *p = buf;
-    const char *end = buf + len;
+    const char* p = buf;
+    const char* end = buf + len;
 
-    while (p < end - 1 && !(p[0] == '\x1b' && p[1] == '[')) p++;
-    if (p >= end - 1) return false;
+    while (p < end - 1 && !(p[0] == '\x1b' && p[1] == '['))
+        p++;
+    if (p >= end - 1)
+        return false;
     p += 2;
 
     *row = 0;
@@ -429,7 +473,8 @@ static bool parse_cpr(const char *buf, size_t len, int32_t *row, int32_t *col) {
         p++;
     }
 
-    if (p >= end || *p != ';') return false;
+    if (p >= end || *p != ';')
+        return false;
     p++;
 
     *col = 0;
@@ -438,13 +483,16 @@ static bool parse_cpr(const char *buf, size_t len, int32_t *row, int32_t *col) {
         p++;
     }
 
-    if (p >= end || *p != 'R') return false;
+    if (p >= end || *p != 'R')
+        return false;
     return (*row > 0 && *col > 0);
 }
 
 // Query terminal background color using OSC 11
-static bool query_background_color(DawnColor *out) {
-    if (!out) return false;
+static bool query_background_color(DawnColor* out)
+{
+    if (!out)
+        return false;
 
     drain_input();
 
@@ -455,16 +503,19 @@ static bool query_background_color(DawnColor *out) {
     char buf[64];
     size_t len = read_response(buf, sizeof(buf), '\\', 100);
 
-    if (len < 10) return false;
+    if (len < 10)
+        return false;
 
     // Find "rgb:" in response
-    char *rgb = strstr(buf, "rgb:");
-    if (!rgb) return false;
+    char* rgb = strstr(buf, "rgb:");
+    if (!rgb)
+        return false;
     rgb += 4;
 
     // Parse RRRR/GGGG/BBBB (16-bit hex values)
     uint32_t r, g, b;
-    if (sscanf(rgb, "%x/%x/%x", &r, &g, &b) != 3) return false;
+    if (sscanf(rgb, "%x/%x/%x", &r, &g, &b) != 3)
+        return false;
 
     // Convert 16-bit to 8-bit
     out->r = (uint8_t)(r >> 8);
@@ -474,7 +525,8 @@ static bool query_background_color(DawnColor *out) {
     return true;
 }
 
-static bool query_text_sizing(void) {
+static bool query_text_sizing(void)
+{
     query_write(CSI "1;1H", sizeof(CSI "1;1H") - 1);
     drain_input();
 
@@ -484,7 +536,8 @@ static bool query_text_sizing(void) {
     size_t len1 = read_response(buf1, sizeof(buf1), 'R', 100);
 
     int32_t row1, col1;
-    if (!parse_cpr(buf1, len1, &row1, &col1)) return false;
+    if (!parse_cpr(buf1, len1, &row1, &col1))
+        return false;
 
     query_write(ESC "]66;w=2; " ESC "\\", sizeof(ESC "]66;w=2; " ESC "\\") - 1);
 
@@ -494,16 +547,17 @@ static bool query_text_sizing(void) {
     size_t len2 = read_response(buf2, sizeof(buf2), 'R', 100);
 
     int32_t row2, col2;
-    if (!parse_cpr(buf2, len2, &row2, &col2)) return false;
+    if (!parse_cpr(buf2, len2, &row2, &col2))
+        return false;
 
     return (row1 == row2 && col2 - col1 == 2);
 }
 
-
-static void detect_capabilities(void) {
+static void detect_capabilities(void)
+{
     posix_state.capabilities = DAWN_CAP_NONE;
 
-    const char *colorterm = getenv("COLORTERM");
+    const char* colorterm = getenv("COLORTERM");
     if (colorterm && (strcmp(colorterm, "truecolor") == 0 || strcmp(colorterm, "24bit") == 0)) {
         posix_state.capabilities |= DAWN_CAP_TRUE_COLOR;
     }
@@ -536,9 +590,10 @@ static void detect_capabilities(void) {
     drain_input();
 }
 
-
-static bool posix_init(DawnMode mode) {
-    if (posix_state.initialized) return true;
+static bool posix_init(DawnMode mode)
+{
+    if (posix_state.initialized)
+        return true;
 
     posix_state.mode = mode;
     posix_state.tty_fd = -1;
@@ -546,7 +601,8 @@ static bool posix_init(DawnMode mode) {
     // Allocate output buffer
     if (!output_buf) {
         output_buf = malloc(OUTPUT_BUF_SIZE);
-        if (!output_buf) return false;
+        if (!output_buf)
+            return false;
     }
 
     if (mode == DAWN_MODE_PRINT) {
@@ -666,8 +722,10 @@ static bool posix_init(DawnMode mode) {
     return true;
 }
 
-static void posix_shutdown(void) {
-    if (!posix_state.initialized) return;
+static void posix_shutdown(void)
+{
+    if (!posix_state.initialized)
+        return;
 
     if (posix_state.mode == DAWN_MODE_PRINT) {
         // Print mode cleanup: just close tty_fd if we opened it
@@ -716,92 +774,117 @@ static void posix_shutdown(void) {
     posix_state.initialized = false;
 }
 
-static uint32_t posix_get_capabilities(void) {
+static uint32_t posix_get_capabilities(void)
+{
     return posix_state.capabilities;
 }
 
-static DawnColor *posix_get_host_bg(void) {
-    if (!posix_state.print_bg) return NULL;
-    DawnColor *copy = malloc(sizeof(DawnColor));
-    if (copy) *copy = *posix_state.print_bg;
+static DawnColor* posix_get_host_bg(void)
+{
+    if (!posix_state.print_bg)
+        return NULL;
+    DawnColor* copy = malloc(sizeof(DawnColor));
+    if (copy)
+        *copy = *posix_state.print_bg;
     return copy;
 }
 
-static void posix_get_size(int32_t *out_cols, int32_t *out_rows) {
+static void posix_get_size(int32_t* out_cols, int32_t* out_rows)
+{
     struct winsize ws;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0) {
         posix_state.cols = ws.ws_col;
         posix_state.rows = ws.ws_row;
     }
-    if (out_cols) *out_cols = posix_state.cols;
-    if (out_rows) *out_rows = posix_state.rows;
+    if (out_cols)
+        *out_cols = posix_state.cols;
+    if (out_rows)
+        *out_rows = posix_state.rows;
 }
 
-static void posix_set_cursor(int32_t col, int32_t row) {
+static void posix_set_cursor(int32_t col, int32_t row)
+{
     buf_cursor(row, col);
 }
 
-static void posix_set_cursor_visible(bool visible) {
+static void posix_set_cursor_visible(bool visible)
+{
     buf_append_str(visible ? CURSOR_SHOW : CURSOR_HIDE);
 }
 
-static void posix_set_fg(DawnColor color) {
+static void posix_set_fg(DawnColor color)
+{
     buf_fg(color.r, color.g, color.b);
 }
 
-static void posix_set_bg(DawnColor color) {
+static void posix_set_bg(DawnColor color)
+{
     // In print mode, skip setting bg if it matches the captured terminal bg
     // This lets the terminal's native background show through
     if (posix_state.mode == DAWN_MODE_PRINT && posix_state.print_bg) {
-        if (color.r == posix_state.print_bg->r &&
-            color.g == posix_state.print_bg->g &&
-            color.b == posix_state.print_bg->b) {
+        if (color.r == posix_state.print_bg->r && color.g == posix_state.print_bg->g && color.b == posix_state.print_bg->b) {
             return;
         }
     }
     buf_bg(color.r, color.g, color.b);
 }
 
-static void posix_reset_attrs(void) {
+static void posix_reset_attrs(void)
+{
     buf_append_str(RESET);
 }
 
-static void posix_set_bold(bool enabled) {
+static void posix_set_bold(bool enabled)
+{
     buf_append_str(enabled ? BOLD : CSI "22m");
 }
 
-static void posix_set_italic(bool enabled) {
+static void posix_set_italic(bool enabled)
+{
     buf_append_str(enabled ? ITALIC : CSI "23m");
 }
 
-static void posix_set_dim(bool enabled) {
+static void posix_set_dim(bool enabled)
+{
     buf_append_str(enabled ? DIM : CSI "22m");
 }
 
-static void posix_set_strikethrough(bool enabled) {
+static void posix_set_strikethrough(bool enabled)
+{
     buf_append_str(enabled ? STRIKETHROUGH : CSI "29m");
 }
 
-static void posix_set_underline(DawnUnderline style) {
+static void posix_set_underline(DawnUnderline style)
+{
     if (posix_state.capabilities & DAWN_CAP_STYLED_UNDERLINE) {
         switch (style) {
-            case DAWN_UNDERLINE_SINGLE: buf_append_str(UNDERLINE); break;
-            case DAWN_UNDERLINE_CURLY:  buf_append_str(UNDERLINE_CURLY); break;
-            case DAWN_UNDERLINE_DOTTED: buf_append_str(UNDERLINE_DOTTED); break;
-            case DAWN_UNDERLINE_DASHED: buf_append_str(UNDERLINE_DASHED); break;
+        case DAWN_UNDERLINE_SINGLE:
+            buf_append_str(UNDERLINE);
+            break;
+        case DAWN_UNDERLINE_CURLY:
+            buf_append_str(UNDERLINE_CURLY);
+            break;
+        case DAWN_UNDERLINE_DOTTED:
+            buf_append_str(UNDERLINE_DOTTED);
+            break;
+        case DAWN_UNDERLINE_DASHED:
+            buf_append_str(UNDERLINE_DASHED);
+            break;
         }
     } else {
         buf_append_str(UNDERLINE);
     }
 }
 
-static void posix_set_underline_color(DawnColor color) {
+static void posix_set_underline_color(DawnColor color)
+{
     if (posix_state.capabilities & DAWN_CAP_STYLED_UNDERLINE) {
         buf_underline_color(color.r, color.g, color.b);
     }
 }
 
-static void posix_clear_underline(void) {
+static void posix_clear_underline(void)
+{
     if (posix_state.capabilities & DAWN_CAP_STYLED_UNDERLINE) {
         buf_append_str(UNDERLINE_OFF);
     } else {
@@ -809,38 +892,45 @@ static void posix_clear_underline(void) {
     }
 }
 
-static void posix_clear_screen(void) {
+static void posix_clear_screen(void)
+{
     // No-op in print mode - we're streaming output
-    if (posix_state.mode == DAWN_MODE_PRINT) return;
+    if (posix_state.mode == DAWN_MODE_PRINT)
+        return;
     buf_append_str(CLEAR_SCREEN CURSOR_HOME);
 }
 
-static void posix_clear_line(void) {
+static void posix_clear_line(void)
+{
     // No-op in print mode - we're streaming output
-    if (posix_state.mode == DAWN_MODE_PRINT) return;
+    if (posix_state.mode == DAWN_MODE_PRINT)
+        return;
     buf_append_str(CLEAR_LINE);
 }
 
-static void posix_clear_range(int32_t count) {
+static void posix_clear_range(int32_t count)
+{
     // No-op in print mode or invalid count
-    if (posix_state.mode == DAWN_MODE_PRINT || count <= 0) return;
+    if (posix_state.mode == DAWN_MODE_PRINT || count <= 0)
+        return;
     // ECH (Erase Character) - erases N chars at cursor using current bg
     char buf[16];
     snprintf(buf, sizeof(buf), CSI "%dX", count);
     buf_append_str(buf);
 }
 
-static void posix_write_str(const char *str, size_t len) {
+static void posix_write_str(const char* str, size_t len)
+{
     buf_append(str, len);
     // Track column position in print mode
     if (posix_state.mode == DAWN_MODE_PRINT) {
         // Handle newlines specially, otherwise use display width
-        const char *nl = memchr(str, '\n', len);
+        const char* nl = memchr(str, '\n', len);
         if (nl) {
             // String contains newlines - process segments
             size_t pos = 0;
             while (pos < len) {
-                const char *next_nl = memchr(str + pos, '\n', len - pos);
+                const char* next_nl = memchr(str + pos, '\n', len - pos);
                 if (next_nl) {
                     size_t seg_len = (size_t)(next_nl - (str + pos));
                     if (seg_len > 0) {
@@ -860,7 +950,8 @@ static void posix_write_str(const char *str, size_t len) {
     }
 }
 
-static void posix_write_char(char c) {
+static void posix_write_char(char c)
+{
     buf_append_char(c);
     // Track column position in print mode
     if (posix_state.mode == DAWN_MODE_PRINT) {
@@ -873,8 +964,10 @@ static void posix_write_char(char c) {
     }
 }
 
-static void posix_repeat_char(char c, int32_t n) {
-    if (n <= 0) return;
+static void posix_repeat_char(char c, int32_t n)
+{
+    if (n <= 0)
+        return;
     buf_append_char(c);
     if (n > 1) {
         // REP sequence: CSI n b - repeat previous char n times
@@ -891,7 +984,8 @@ static void posix_repeat_char(char c, int32_t n) {
     }
 }
 
-static void posix_write_scaled(const char *str, size_t len, int32_t scale) {
+static void posix_write_scaled(const char* str, size_t len, int32_t scale)
+{
     if (scale <= 1 || !(posix_state.capabilities & DAWN_CAP_TEXT_SIZING)) {
         buf_append(str, len);
         if (posix_state.mode == DAWN_MODE_PRINT) {
@@ -899,7 +993,8 @@ static void posix_write_scaled(const char *str, size_t len, int32_t scale) {
         }
         return;
     }
-    if (scale > 7) scale = 7;
+    if (scale > 7)
+        scale = 7;
     buf_printf(TEXT_SIZE_OSC "s=%d;%.*s" TEXT_SIZE_ST, scale, (int32_t)len, str);
     // Track column position (scaled text takes more columns)
     if (posix_state.mode == DAWN_MODE_PRINT) {
@@ -907,7 +1002,8 @@ static void posix_write_scaled(const char *str, size_t len, int32_t scale) {
     }
 }
 
-static void posix_write_scaled_frac(const char *str, size_t len, int32_t scale, int32_t num, int32_t denom) {
+static void posix_write_scaled_frac(const char* str, size_t len, int32_t scale, int32_t num, int32_t denom)
+{
     if (!(posix_state.capabilities & DAWN_CAP_TEXT_SIZING)) {
         buf_append(str, len);
         if (posix_state.mode == DAWN_MODE_PRINT) {
@@ -916,12 +1012,18 @@ static void posix_write_scaled_frac(const char *str, size_t len, int32_t scale, 
         return;
     }
     // Clamp values to valid ranges
-    if (scale < 1) scale = 1;
-    if (scale > 7) scale = 7;
-    if (num < 0) num = 0;
-    if (num > 15) num = 15;
-    if (denom < 0) denom = 0;
-    if (denom > 15) denom = 15;
+    if (scale < 1)
+        scale = 1;
+    if (scale > 7)
+        scale = 7;
+    if (num < 0)
+        num = 0;
+    if (num > 15)
+        num = 15;
+    if (denom < 0)
+        denom = 0;
+    if (denom > 15)
+        denom = 15;
 
     // No fractional scaling - use simple scaled output
     if (num == 0 || denom == 0 || num >= denom) {
@@ -941,43 +1043,48 @@ static void posix_write_scaled_frac(const char *str, size_t len, int32_t scale, 
 
     // Fractional scaling: s=scale:n=num:d=denom
     buf_printf(TEXT_SIZE_OSC "s=%d:n=%d:d=%d;%.*s" TEXT_SIZE_ST,
-               scale, num, denom, (int32_t)len, str);
+        scale, num, denom, (int32_t)len, str);
     if (posix_state.mode == DAWN_MODE_PRINT) {
         // Approximate column width for fractional scaling
         posix_state.print_col += utf8_display_width(str, len) * scale;
     }
 }
 
-static void posix_flush(void) {
+static void posix_flush(void)
+{
     buf_flush();
     fflush(stdout);
 }
 
-static void posix_sync_begin(void) {
+static void posix_sync_begin(void)
+{
     if (posix_state.capabilities & DAWN_CAP_SYNC_OUTPUT) {
         buf_append_str(SYNC_START);
     }
 }
 
-static void posix_sync_end(void) {
+static void posix_sync_end(void)
+{
     if (posix_state.capabilities & DAWN_CAP_SYNC_OUTPUT) {
         buf_append_str(SYNC_END);
     }
 }
 
-static void posix_set_title(const char *title) {
+static void posix_set_title(const char* title)
+{
     // OSC 0 sets window title: ESC ] 0 ; title BEL
     if (title && *title) {
         buf_append_str("\x1b]0;");
         buf_append_str(title);
-        buf_append_char('\x07');  // BEL terminator
+        buf_append_char('\x07'); // BEL terminator
     } else {
         // Reset to empty/default
         buf_append_str("\x1b]0;\x07");
     }
 }
 
-static void posix_link_begin(const char *url) {
+static void posix_link_begin(const char* url)
+{
     // OSC 8 hyperlink: ESC ] 8 ; ; url ST
     if (url && *url) {
         buf_append_str("\x1b]8;;");
@@ -986,12 +1093,14 @@ static void posix_link_begin(const char *url) {
     }
 }
 
-static void posix_link_end(void) {
+static void posix_link_end(void)
+{
     // Close OSC 8 hyperlink
     buf_append_str("\x1b]8;;\x1b\\");
 }
 
-static void drain_escape_sequence(void) {
+static void drain_escape_sequence(void)
+{
     char c;
     struct termios t;
     tcgetattr(STDIN_FILENO, &t);
@@ -999,15 +1108,18 @@ static void drain_escape_sequence(void) {
     t.c_cc[VMIN] = 0;
     tcsetattr(STDIN_FILENO, TCSANOW, &t);
 
-    while (read(STDIN_FILENO, &c, 1) == 1) {}
+    while (read(STDIN_FILENO, &c, 1) == 1) {
+    }
 
     t.c_cc[VTIME] = 1;
     tcsetattr(STDIN_FILENO, TCSANOW, &t);
 }
 
-static int32_t posix_read_key(void) {
+static int32_t posix_read_key(void)
+{
     char c;
-    if (read(STDIN_FILENO, &c, 1) <= 0) return DAWN_KEY_NONE;
+    if (read(STDIN_FILENO, &c, 1) <= 0)
+        return DAWN_KEY_NONE;
 
     if (c == '\x1b') {
         char seq[8];
@@ -1042,7 +1154,8 @@ static int32_t posix_read_key(void) {
                 int32_t mi = 0;
 
                 while (mi < 30) {
-                    if (read(STDIN_FILENO, &mouse_buf[mi], 1) != 1) break;
+                    if (read(STDIN_FILENO, &mouse_buf[mi], 1) != 1)
+                        break;
                     if (mouse_buf[mi] == 'M' || mouse_buf[mi] == 'm') {
                         mouse_buf[mi + 1] = '\0';
                         break;
@@ -1053,10 +1166,13 @@ static int32_t posix_read_key(void) {
                 if (sscanf(mouse_buf, "%d;%d;%d", &btn, &mx, &my) == 3) {
                     posix_state.last_mouse_col = mx;
                     posix_state.last_mouse_row = my;
-                    if (btn == 64) return DAWN_KEY_MOUSE_SCROLL_UP;
-                    if (btn == 65) return DAWN_KEY_MOUSE_SCROLL_DOWN;
+                    if (btn == 64)
+                        return DAWN_KEY_MOUSE_SCROLL_UP;
+                    if (btn == 65)
+                        return DAWN_KEY_MOUSE_SCROLL_DOWN;
                     // Left button click (btn 0 = press, check for 'M' terminator)
-                    if (btn == 0) return DAWN_KEY_MOUSE_CLICK;
+                    if (btn == 0)
+                        return DAWN_KEY_MOUSE_CLICK;
                 }
                 return DAWN_KEY_NONE;
             }
@@ -1076,15 +1192,14 @@ static int32_t posix_read_key(void) {
                 tcsetattr(STDIN_FILENO, TCSANOW, &t2);
 
                 while (pi < 30) {
-                    if (read(STDIN_FILENO, &peek[pi], 1) != 1) break;
+                    if (read(STDIN_FILENO, &peek[pi], 1) != 1)
+                        break;
                     if (peek[pi] == 'u') {
                         is_kitty = true;
                         peek[pi + 1] = '\0';
                         break;
                     }
-                    if (peek[pi] == '~' || peek[pi] == 'A' || peek[pi] == 'B' ||
-                        peek[pi] == 'C' || peek[pi] == 'D' || peek[pi] == 'H' ||
-                        peek[pi] == 'F' || peek[pi] == 'M' || peek[pi] == 'm') {
+                    if (peek[pi] == '~' || peek[pi] == 'A' || peek[pi] == 'B' || peek[pi] == 'C' || peek[pi] == 'D' || peek[pi] == 'H' || peek[pi] == 'F' || peek[pi] == 'M' || peek[pi] == 'm') {
                         peek[pi + 1] = '\0';
                         break;
                     }
@@ -1097,52 +1212,72 @@ static int32_t posix_read_key(void) {
                 if (is_kitty) {
                     int32_t keycode = 0, mods = 1;
                     char term = 0;
-                    if (sscanf(peek, "%d;%d%c", &keycode, &mods, &term) >= 2 ||
-                        sscanf(peek, "%d%c", &keycode, &term) >= 1) {
+                    if (sscanf(peek, "%d;%d%c", &keycode, &mods, &term) >= 2 || sscanf(peek, "%d%c", &keycode, &term) >= 1) {
 
                         bool shift = (mods - 1) & 1;
                         bool alt = (mods - 1) & 2;
                         bool ctrl = (mods - 1) & 4;
 
                         switch (keycode) {
-                            case 57352:  // Up
-                                if (shift) return DAWN_KEY_SHIFT_UP;
-                                return DAWN_KEY_UP;
-                            case 57353:  // Down
-                                if (shift) return DAWN_KEY_SHIFT_DOWN;
-                                return DAWN_KEY_DOWN;
-                            case 57351:
-                                if (alt && shift) return DAWN_KEY_ALT_SHIFT_RIGHT;
-                                if (alt) return DAWN_KEY_ALT_RIGHT;
-                                if (ctrl && shift) return DAWN_KEY_CTRL_SHIFT_RIGHT;
-                                if (ctrl) return DAWN_KEY_CTRL_RIGHT;
-                                if (shift) return DAWN_KEY_SHIFT_RIGHT;
-                                return DAWN_KEY_RIGHT;
-                            case 57350:
-                                if (alt && shift) return DAWN_KEY_ALT_SHIFT_LEFT;
-                                if (alt) return DAWN_KEY_ALT_LEFT;
-                                if (ctrl && shift) return DAWN_KEY_CTRL_SHIFT_LEFT;
-                                if (ctrl) return DAWN_KEY_CTRL_LEFT;
-                                if (shift) return DAWN_KEY_SHIFT_LEFT;
-                                return DAWN_KEY_LEFT;
-                            case 57360:  // Home
-                                if (ctrl) return DAWN_KEY_CTRL_HOME;
-                                return DAWN_KEY_HOME;
-                            case 57367:  // End
-                                if (ctrl) return DAWN_KEY_CTRL_END;
-                                return DAWN_KEY_END;
-                            case 57362: return DAWN_KEY_DEL;
-                            case 57365: return DAWN_KEY_PGUP;
-                            case 57366: return DAWN_KEY_PGDN;
-                            case 9: return shift ? DAWN_KEY_BTAB : '\t';
-                            case 13: return '\r';
-                            case 27: return '\x1b';
-                            case 127: return 127;
+                        case 57352: // Up
+                            if (shift)
+                                return DAWN_KEY_SHIFT_UP;
+                            return DAWN_KEY_UP;
+                        case 57353: // Down
+                            if (shift)
+                                return DAWN_KEY_SHIFT_DOWN;
+                            return DAWN_KEY_DOWN;
+                        case 57351:
+                            if (alt && shift)
+                                return DAWN_KEY_ALT_SHIFT_RIGHT;
+                            if (alt)
+                                return DAWN_KEY_ALT_RIGHT;
+                            if (ctrl && shift)
+                                return DAWN_KEY_CTRL_SHIFT_RIGHT;
+                            if (ctrl)
+                                return DAWN_KEY_CTRL_RIGHT;
+                            if (shift)
+                                return DAWN_KEY_SHIFT_RIGHT;
+                            return DAWN_KEY_RIGHT;
+                        case 57350:
+                            if (alt && shift)
+                                return DAWN_KEY_ALT_SHIFT_LEFT;
+                            if (alt)
+                                return DAWN_KEY_ALT_LEFT;
+                            if (ctrl && shift)
+                                return DAWN_KEY_CTRL_SHIFT_LEFT;
+                            if (ctrl)
+                                return DAWN_KEY_CTRL_LEFT;
+                            if (shift)
+                                return DAWN_KEY_SHIFT_LEFT;
+                            return DAWN_KEY_LEFT;
+                        case 57360: // Home
+                            if (ctrl)
+                                return DAWN_KEY_CTRL_HOME;
+                            return DAWN_KEY_HOME;
+                        case 57367: // End
+                            if (ctrl)
+                                return DAWN_KEY_CTRL_END;
+                            return DAWN_KEY_END;
+                        case 57362:
+                            return DAWN_KEY_DEL;
+                        case 57365:
+                            return DAWN_KEY_PGUP;
+                        case 57366:
+                            return DAWN_KEY_PGDN;
+                        case 9:
+                            return shift ? DAWN_KEY_BTAB : '\t';
+                        case 13:
+                            return '\r';
+                        case 27:
+                            return '\x1b';
+                        case 127:
+                            return 127;
                         }
 
                         if (keycode >= 32 && keycode < 127) {
                             if (ctrl && keycode == '/') {
-                                return 31;  // Ctrl+/
+                                return 31; // Ctrl+/
                             }
                             if (ctrl && keycode >= 'a' && keycode <= 'z') {
                                 return keycode - 'a' + 1;
@@ -1161,11 +1296,16 @@ static int32_t posix_read_key(void) {
                     int32_t num = 0;
                     sscanf(peek, "%d", &num);
                     switch (num) {
-                        case 1: return DAWN_KEY_HOME;
-                        case 3: return DAWN_KEY_DEL;
-                        case 4: return DAWN_KEY_END;
-                        case 5: return DAWN_KEY_PGUP;
-                        case 6: return DAWN_KEY_PGDN;
+                    case 1:
+                        return DAWN_KEY_HOME;
+                    case 3:
+                        return DAWN_KEY_DEL;
+                    case 4:
+                        return DAWN_KEY_END;
+                    case 5:
+                        return DAWN_KEY_PGUP;
+                    case 6:
+                        return DAWN_KEY_PGDN;
                     }
                     return DAWN_KEY_NONE;
                 }
@@ -1178,52 +1318,75 @@ static int32_t posix_read_key(void) {
                     bool alt = (num2 == 3 || num2 == 4 || num2 == 7 || num2 == 8 || num2 == 11 || num2 == 12 || num2 == 15 || num2 == 16);
 
                     switch (termchar) {
-                        case 'A':  // Up
-                            if (shift) return DAWN_KEY_SHIFT_UP;
-                            return DAWN_KEY_UP;
-                        case 'B':  // Down
-                            if (shift) return DAWN_KEY_SHIFT_DOWN;
-                            return DAWN_KEY_DOWN;
-                        case 'C':
-                            if (alt && shift) return DAWN_KEY_ALT_SHIFT_RIGHT;
-                            if (alt) return DAWN_KEY_ALT_RIGHT;
-                            if (ctrl && shift) return DAWN_KEY_CTRL_SHIFT_RIGHT;
-                            if (ctrl) return DAWN_KEY_CTRL_RIGHT;
-                            if (shift) return DAWN_KEY_SHIFT_RIGHT;
-                            return DAWN_KEY_RIGHT;
-                        case 'D':
-                            if (alt && shift) return DAWN_KEY_ALT_SHIFT_LEFT;
-                            if (alt) return DAWN_KEY_ALT_LEFT;
-                            if (ctrl && shift) return DAWN_KEY_CTRL_SHIFT_LEFT;
-                            if (ctrl) return DAWN_KEY_CTRL_LEFT;
-                            if (shift) return DAWN_KEY_SHIFT_LEFT;
-                            return DAWN_KEY_LEFT;
-                        case 'H':  // Home
-                            if (ctrl) return DAWN_KEY_CTRL_HOME;
-                            return DAWN_KEY_HOME;
-                        case 'F':  // End
-                            if (ctrl) return DAWN_KEY_CTRL_END;
-                            return DAWN_KEY_END;
+                    case 'A': // Up
+                        if (shift)
+                            return DAWN_KEY_SHIFT_UP;
+                        return DAWN_KEY_UP;
+                    case 'B': // Down
+                        if (shift)
+                            return DAWN_KEY_SHIFT_DOWN;
+                        return DAWN_KEY_DOWN;
+                    case 'C':
+                        if (alt && shift)
+                            return DAWN_KEY_ALT_SHIFT_RIGHT;
+                        if (alt)
+                            return DAWN_KEY_ALT_RIGHT;
+                        if (ctrl && shift)
+                            return DAWN_KEY_CTRL_SHIFT_RIGHT;
+                        if (ctrl)
+                            return DAWN_KEY_CTRL_RIGHT;
+                        if (shift)
+                            return DAWN_KEY_SHIFT_RIGHT;
+                        return DAWN_KEY_RIGHT;
+                    case 'D':
+                        if (alt && shift)
+                            return DAWN_KEY_ALT_SHIFT_LEFT;
+                        if (alt)
+                            return DAWN_KEY_ALT_LEFT;
+                        if (ctrl && shift)
+                            return DAWN_KEY_CTRL_SHIFT_LEFT;
+                        if (ctrl)
+                            return DAWN_KEY_CTRL_LEFT;
+                        if (shift)
+                            return DAWN_KEY_SHIFT_LEFT;
+                        return DAWN_KEY_LEFT;
+                    case 'H': // Home
+                        if (ctrl)
+                            return DAWN_KEY_CTRL_HOME;
+                        return DAWN_KEY_HOME;
+                    case 'F': // End
+                        if (ctrl)
+                            return DAWN_KEY_CTRL_END;
+                        return DAWN_KEY_END;
                     }
                 }
                 return DAWN_KEY_NONE;
             }
 
             switch (seq[1]) {
-                case 'A': return DAWN_KEY_UP;
-                case 'B': return DAWN_KEY_DOWN;
-                case 'C': return DAWN_KEY_RIGHT;
-                case 'D': return DAWN_KEY_LEFT;
-                case 'H': return DAWN_KEY_HOME;
-                case 'F': return DAWN_KEY_END;
-                case 'Z': return DAWN_KEY_BTAB;
+            case 'A':
+                return DAWN_KEY_UP;
+            case 'B':
+                return DAWN_KEY_DOWN;
+            case 'C':
+                return DAWN_KEY_RIGHT;
+            case 'D':
+                return DAWN_KEY_LEFT;
+            case 'H':
+                return DAWN_KEY_HOME;
+            case 'F':
+                return DAWN_KEY_END;
+            case 'Z':
+                return DAWN_KEY_BTAB;
             }
             drain_escape_sequence();
             return DAWN_KEY_NONE;
         } else if (seq[0] == 'O') {
             switch (seq[1]) {
-                case 'H': return DAWN_KEY_HOME;
-                case 'F': return DAWN_KEY_END;
+            case 'H':
+                return DAWN_KEY_HOME;
+            case 'F':
+                return DAWN_KEY_END;
             }
             return DAWN_KEY_NONE;
         } else if (seq[0] == 'b') {
@@ -1237,15 +1400,18 @@ static int32_t posix_read_key(void) {
     return (uint8_t)c;
 }
 
-static int32_t posix_get_last_mouse_col(void) {
+static int32_t posix_get_last_mouse_col(void)
+{
     return posix_state.last_mouse_col;
 }
 
-static int32_t posix_get_last_mouse_row(void) {
+static int32_t posix_get_last_mouse_row(void)
+{
     return posix_state.last_mouse_row;
 }
 
-static bool posix_check_resize(void) {
+static bool posix_check_resize(void)
+{
     if (posix_state.resize_needed) {
         posix_state.resize_needed = 0;
         return true;
@@ -1253,16 +1419,18 @@ static bool posix_check_resize(void) {
     return false;
 }
 
-static bool posix_check_quit(void) {
+static bool posix_check_quit(void)
+{
     return posix_state.quit_requested;
 }
 
-static bool posix_input_available(float timeout_ms) {
+static bool posix_input_available(float timeout_ms)
+{
     struct timeval tv;
     fd_set fds;
     FD_ZERO(&fds);
     FD_SET(STDIN_FILENO, &fds);
-    
+
     if (timeout_ms < 0) {
         // Block forever
         return select(STDIN_FILENO + 1, &fds, NULL, NULL, NULL) > 0;
@@ -1278,21 +1446,24 @@ static bool posix_input_available(float timeout_ms) {
 static void (*user_resize_callback)(int32_t) = NULL;
 static void (*user_quit_callback)(int32_t) = NULL;
 
-static void posix_sigwinch_handler(int32_t sig) {
+static void posix_sigwinch_handler(int32_t sig)
+{
     posix_state.resize_needed = 1;
     if (user_resize_callback) {
         user_resize_callback(sig);
     }
 }
 
-static void posix_sigquit_handler(int32_t sig) {
+static void posix_sigquit_handler(int32_t sig)
+{
     posix_state.quit_requested = 1;
     if (user_quit_callback) {
         user_quit_callback(sig);
     }
 }
 
-static void posix_register_signals(void (*on_resize)(int32_t), void (*on_quit)(int32_t)) {
+static void posix_register_signals(void (*on_resize)(int32_t), void (*on_quit)(int32_t))
+{
     user_resize_callback = on_resize;
     user_quit_callback = on_quit;
 
@@ -1301,12 +1472,12 @@ static void posix_register_signals(void (*on_resize)(int32_t), void (*on_quit)(i
     signal(SIGTERM, posix_sigquit_handler);
 }
 
-
 #ifdef __APPLE__
 #define UTF8_PLAIN_TEXT_TYPE CFSTR("public.utf8-plain-text")
 #define PLAIN_TEXT_TYPE CFSTR("com.apple.traditional-mac-plain-text")
 
-static void posix_clipboard_copy(const char *text, size_t len) {
+static void posix_clipboard_copy(const char* text, size_t len)
+{
     PasteboardRef pasteboard;
     if (PasteboardCreate(kPasteboardClipboard, &pasteboard) != noErr) {
         return;
@@ -1314,7 +1485,7 @@ static void posix_clipboard_copy(const char *text, size_t len) {
 
     PasteboardClear(pasteboard);
 
-    CFDataRef data = CFDataCreate(kCFAllocatorDefault, (const UInt8 *)text, (CFIndex)len);
+    CFDataRef data = CFDataCreate(kCFAllocatorDefault, (const UInt8*)text, (CFIndex)len);
     if (data) {
         PasteboardPutItemFlavor(pasteboard, (PasteboardItemID)1, UTF8_PLAIN_TEXT_TYPE, data, 0);
         CFRelease(data);
@@ -1323,7 +1494,8 @@ static void posix_clipboard_copy(const char *text, size_t len) {
     CFRelease(pasteboard);
 }
 
-static char *posix_clipboard_paste(size_t *out_len) {
+static char* posix_clipboard_paste(size_t* out_len)
+{
     PasteboardRef pasteboard;
     *out_len = 0;
 
@@ -1355,7 +1527,7 @@ static char *posix_clipboard_paste(size_t *out_len) {
         }
     }
 
-    char *result = NULL;
+    char* result = NULL;
     CFStringRef clipboard_string = CFStringCreateFromExternalRepresentation(
         kCFAllocatorDefault, clipboard_data, kCFStringEncodingUTF8);
     if (clipboard_string) {
@@ -1382,20 +1554,23 @@ static char *posix_clipboard_paste(size_t *out_len) {
 
 #else
 // Linux fallback using xclip/xsel
-static void posix_clipboard_copy(const char *text, size_t len) {
-    FILE *p = popen("xclip -selection clipboard 2>/dev/null || xsel --clipboard 2>/dev/null", "w");
+static void posix_clipboard_copy(const char* text, size_t len)
+{
+    FILE* p = popen("xclip -selection clipboard 2>/dev/null || xsel --clipboard 2>/dev/null", "w");
     if (p) {
         fwrite(text, 1, len, p);
         pclose(p);
     }
 }
 
-static char *posix_clipboard_paste(size_t *out_len) {
+static char* posix_clipboard_paste(size_t* out_len)
+{
     *out_len = 0;
-    FILE *p = popen("xclip -selection clipboard -o 2>/dev/null || xsel --clipboard -o 2>/dev/null", "r");
-    if (!p) return NULL;
+    FILE* p = popen("xclip -selection clipboard -o 2>/dev/null || xsel --clipboard -o 2>/dev/null", "r");
+    if (!p)
+        return NULL;
 
-    char *result = NULL;
+    char* result = NULL;
     size_t cap = 0;
     size_t len = 0;
     char buf[1024];
@@ -1419,21 +1594,23 @@ static char *posix_clipboard_paste(size_t *out_len) {
 }
 #endif
 
+static const char* posix_get_home_dir(void)
+{
+    const char* home = getenv("HOME");
+    if (home)
+        return home;
 
-static const char *posix_get_home_dir(void) {
-    const char *home = getenv("HOME");
-    if (home) return home;
-
-    struct passwd *pw = getpwuid(getuid());
+    struct passwd* pw = getpwuid(getuid());
     return pw ? pw->pw_dir : NULL;
 }
 
-static bool posix_mkdir_p(const char *path) {
+static bool posix_mkdir_p(const char* path)
+{
     char tmp[512];
     strncpy(tmp, path, sizeof(tmp) - 1);
     tmp[sizeof(tmp) - 1] = '\0';
 
-    for (char *p = tmp + 1; *p; p++) {
+    for (char* p = tmp + 1; *p; p++) {
         if (*p == '/') {
             *p = '\0';
             if (mkdir(tmp, 0755) != 0 && errno != EEXIST) {
@@ -1445,26 +1622,29 @@ static bool posix_mkdir_p(const char *path) {
     return mkdir(tmp, 0755) == 0 || errno == EEXIST;
 }
 
-static bool posix_file_exists(const char *path) {
+static bool posix_file_exists(const char* path)
+{
     struct stat st;
     return stat(path, &st) == 0;
 }
 
-static char *posix_read_file(const char *path, size_t *out_len) {
+static char* posix_read_file(const char* path, size_t* out_len)
+{
     *out_len = 0;
-    FILE *f = fopen(path, "rb");
-    if (!f) return NULL;
+    FILE* f = fopen(path, "rb");
+    if (!f)
+        return NULL;
 
     fseek(f, 0, SEEK_END);
     long size = ftell(f);
     fseek(f, 0, SEEK_SET);
 
-    if (size < 0 || size > 100 * 1024 * 1024) {  // 100MB limit
+    if (size < 0 || size > 100 * 1024 * 1024) { // 100MB limit
         fclose(f);
         return NULL;
     }
 
-    char *data = malloc((size_t)size + 1);
+    char* data = malloc((size_t)size + 1);
     if (!data) {
         fclose(f);
         return NULL;
@@ -1478,9 +1658,11 @@ static char *posix_read_file(const char *path, size_t *out_len) {
     return data;
 }
 
-static bool posix_write_file(const char *path, const char *data, size_t len) {
-    FILE *f = fopen(path, "wb");
-    if (!f) return false;
+static bool posix_write_file(const char* path, const char* data, size_t len)
+{
+    FILE* f = fopen(path, "wb");
+    if (!f)
+        return false;
 
     size_t written = fwrite(data, 1, len, f);
     fclose(f);
@@ -1488,24 +1670,27 @@ static bool posix_write_file(const char *path, const char *data, size_t len) {
     return written == len;
 }
 
-static bool posix_list_dir(const char *path, char ***out_names, int32_t *out_count) {
+static bool posix_list_dir(const char* path, char*** out_names, int32_t* out_count)
+{
     *out_names = NULL;
     *out_count = 0;
 
-    DIR *d = opendir(path);
-    if (!d) return false;
+    DIR* d = opendir(path);
+    if (!d)
+        return false;
 
     int32_t cap = 64;
-    char **names = malloc(sizeof(char *) * (size_t)cap);
+    char** names = malloc(sizeof(char*) * (size_t)cap);
     int32_t count = 0;
 
-    struct dirent *e;
+    struct dirent* e;
     while ((e = readdir(d))) {
-        if (e->d_name[0] == '.') continue;
+        if (e->d_name[0] == '.')
+            continue;
 
         if (count >= cap) {
             cap *= 2;
-            names = realloc(names, sizeof(char *) * (size_t)cap);
+            names = realloc(names, sizeof(char*) * (size_t)cap);
         }
         names[count++] = strdup(e->d_name);
     }
@@ -1516,17 +1701,21 @@ static bool posix_list_dir(const char *path, char ***out_names, int32_t *out_cou
     return true;
 }
 
-static int64_t posix_get_mtime(const char *path) {
+static int64_t posix_get_mtime(const char* path)
+{
     struct stat st;
-    if (stat(path, &st) != 0) return 0;
+    if (stat(path, &st) != 0)
+        return 0;
     return (int64_t)st.st_mtime;
 }
 
-static bool posix_delete_file(const char *path) {
+static bool posix_delete_file(const char* path)
+{
     return unlink(path) == 0;
 }
 
-static void posix_reveal_in_finder(const char *path) {
+static void posix_reveal_in_finder(const char* path)
+{
 #ifdef __APPLE__
     char cmd[1024];
     snprintf(cmd, sizeof(cmd), "open -R '%s' 2>/dev/null", path);
@@ -1540,8 +1729,8 @@ static void posix_reveal_in_finder(const char *path) {
 #endif
 }
 
-
-static int64_t posix_clock(DawnClock kind) {
+static int64_t posix_clock(DawnClock kind)
+{
     if (kind == DAWN_CLOCK_MS) {
         struct timespec ts;
         clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -1550,17 +1739,20 @@ static int64_t posix_clock(DawnClock kind) {
     return (int64_t)time(NULL);
 }
 
-static void posix_sleep_ms(int32_t ms) {
+static void posix_sleep_ms(int32_t ms)
+{
     struct timespec ts;
     ts.tv_sec = ms / 1000;
     ts.tv_nsec = (ms % 1000) * 1000000L;
     nanosleep(&ts, NULL);
 }
 
-static void posix_get_local_time(DawnTime *out) {
-    if (!out) return;
+static void posix_get_local_time(DawnTime* out)
+{
+    if (!out)
+        return;
     time_t now = time(NULL);
-    struct tm *t = localtime(&now);
+    struct tm* t = localtime(&now);
     out->year = t->tm_year + 1900;
     out->mon = t->tm_mon;
     out->mday = t->tm_mday;
@@ -1570,10 +1762,12 @@ static void posix_get_local_time(DawnTime *out) {
     out->wday = t->tm_wday;
 }
 
-static void posix_get_local_time_from(DawnTime *out, int64_t timestamp) {
-    if (!out) return;
+static void posix_get_local_time_from(DawnTime* out, int64_t timestamp)
+{
+    if (!out)
+        return;
     time_t ts = (time_t)timestamp;
-    struct tm *t = localtime(&ts);
+    struct tm* t = localtime(&ts);
     if (!t) {
         memset(out, 0, sizeof(*out));
         return;
@@ -1587,16 +1781,19 @@ static void posix_get_local_time_from(DawnTime *out, int64_t timestamp) {
     out->wday = t->tm_wday;
 }
 
-static const char *posix_get_username(void) {
+static const char* posix_get_username(void)
+{
     static char name[256];
 
-    struct passwd *pw = getpwuid(getuid());
+    struct passwd* pw = getpwuid(getuid());
     if (pw && pw->pw_gecos && pw->pw_gecos[0]) {
         strncpy(name, pw->pw_gecos, sizeof(name) - 1);
         name[sizeof(name) - 1] = '\0';
-        char *comma = strchr(name, ',');
-        if (comma) *comma = '\0';
-        if (name[0]) return name;
+        char* comma = strchr(name, ',');
+        if (comma)
+            *comma = '\0';
+        if (name[0])
+            return name;
     }
 
     if (pw && pw->pw_name) {
@@ -1605,19 +1802,21 @@ static const char *posix_get_username(void) {
         return name;
     }
 
-    const char *user = getenv("USER");
+    const char* user = getenv("USER");
     return user ? user : "Unknown";
 }
 
-
 static const char b64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-static char *base64_encode(const uint8_t *data, size_t input_len, size_t *output_len) {
-    if (input_len > (SIZE_MAX - 2) / 4 * 3) return NULL;
+static char* base64_encode(const uint8_t* data, size_t input_len, size_t* output_len)
+{
+    if (input_len > (SIZE_MAX - 2) / 4 * 3)
+        return NULL;
 
     size_t encoded_len = 4 * ((input_len + 2) / 3);
-    char *encoded = malloc(encoded_len + 1);
-    if (!encoded) return NULL;
+    char* encoded = malloc(encoded_len + 1);
+    if (!encoded)
+        return NULL;
 
     size_t i, j;
     for (i = 0, j = 0; i < input_len;) {
@@ -1634,7 +1833,8 @@ static char *base64_encode(const uint8_t *data, size_t input_len, size_t *output
     int32_t mod = input_len % 3;
     if (mod > 0) {
         encoded[encoded_len - 1] = '=';
-        if (mod == 1) encoded[encoded_len - 2] = '=';
+        if (mod == 1)
+            encoded[encoded_len - 2] = '=';
     }
 
     encoded[encoded_len] = '\0';
@@ -1642,10 +1842,13 @@ static char *base64_encode(const uint8_t *data, size_t input_len, size_t *output
     return encoded;
 }
 
-static bool posix_image_is_supported(const char *path) {
-    if (!path) return false;
-    const char *ext = strrchr(path, '.');
-    if (!ext) return false;
+static bool posix_image_is_supported(const char* path)
+{
+    if (!path)
+        return false;
+    const char* ext = strrchr(path, '.');
+    if (!ext)
+        return false;
     ext++;
 
     char lower[16];
@@ -1655,15 +1858,13 @@ static bool posix_image_is_supported(const char *path) {
     }
     lower[i] = '\0';
 
-    return strcmp(lower, "png") == 0 ||
-           strcmp(lower, "jpg") == 0 ||
-           strcmp(lower, "jpeg") == 0 ||
-           strcmp(lower, "gif") == 0 ||
-           strcmp(lower, "bmp") == 0;
+    return strcmp(lower, "png") == 0 || strcmp(lower, "jpg") == 0 || strcmp(lower, "jpeg") == 0 || strcmp(lower, "gif") == 0 || strcmp(lower, "bmp") == 0;
 }
 
-static bool posix_image_get_size(const char *path, int32_t *out_width, int32_t *out_height) {
-    if (!path || !out_width || !out_height) return false;
+static bool posix_image_get_size(const char* path, int32_t* out_width, int32_t* out_height)
+{
+    if (!path || !out_width || !out_height)
+        return false;
 
     int32_t w, h, channels;
     if (stbi_info(path, &w, &h, &channels)) {
@@ -1674,30 +1875,31 @@ static bool posix_image_get_size(const char *path, int32_t *out_width, int32_t *
     return false;
 }
 
-static TransmittedImage *find_transmitted(const char *path) {
+static TransmittedImage* find_transmitted(const char* path)
+{
     int64_t current_mtime = posix_get_mtime(path);
     for (int32_t i = 0; i < transmitted_count; i++) {
-        if (transmitted_images[i].path &&
-            strcmp(transmitted_images[i].path, path) == 0 &&
-            transmitted_images[i].mtime == current_mtime) {
+        if (transmitted_images[i].path && strcmp(transmitted_images[i].path, path) == 0 && transmitted_images[i].mtime == current_mtime) {
             return &transmitted_images[i];
         }
     }
     return NULL;
 }
 
-static uint32_t transmit_to_terminal(const char *path) {
+static uint32_t transmit_to_terminal(const char* path)
+{
     // Resolve to absolute path for file-based transmission
     char abs_path[PATH_MAX];
-    char *resolved = realpath(path, abs_path);
+    char* resolved = realpath(path, abs_path);
     (void)resolved;
     assert(resolved && "realpath failed for image path");
 
     // Base64 encode the file path for transmission
     size_t path_len = strlen(abs_path);
     size_t b64_len;
-    char *b64_path = base64_encode((uint8_t *)abs_path, path_len, &b64_len);
-    if (!b64_path) return 0;
+    char* b64_path = base64_encode((uint8_t*)abs_path, path_len, &b64_len);
+    if (!b64_path)
+        return 0;
 
     uint32_t image_id = next_image_id++;
 
@@ -1708,14 +1910,14 @@ static uint32_t transmit_to_terminal(const char *path) {
     free(b64_path);
 
     // Cache
-    TransmittedImage *entry;
+    TransmittedImage* entry;
     if (transmitted_count < MAX_TRANSMITTED_IMAGES) {
         entry = &transmitted_images[transmitted_count++];
     } else {
         buf_printf("\x1b_Ga=d,d=I,i=%u,q=2\x1b\\", transmitted_images[0].image_id);
         free(transmitted_images[0].path);
         memmove(&transmitted_images[0], &transmitted_images[1],
-                sizeof(TransmittedImage) * (MAX_TRANSMITTED_IMAGES - 1));
+            sizeof(TransmittedImage) * (MAX_TRANSMITTED_IMAGES - 1));
         entry = &transmitted_images[MAX_TRANSMITTED_IMAGES - 1];
     }
     entry->path = strdup(path);
@@ -1725,22 +1927,30 @@ static uint32_t transmit_to_terminal(const char *path) {
     return image_id;
 }
 
-static uint32_t ensure_transmitted(const char *path) {
-    TransmittedImage *t = find_transmitted(path);
-    if (t) return t->image_id;
+static uint32_t ensure_transmitted(const char* path)
+{
+    TransmittedImage* t = find_transmitted(path);
+    if (t)
+        return t->image_id;
     return transmit_to_terminal(path);
 }
 
-static int32_t posix_image_display(const char *path, int32_t row, int32_t col, int32_t max_cols, int32_t max_rows) {
-    if (!path) return 0;
-    (void)row; (void)col;  // Position set by caller
+static int32_t posix_image_display(const char* path, int32_t row, int32_t col, int32_t max_cols, int32_t max_rows)
+{
+    if (!path)
+        return 0;
+    (void)row;
+    (void)col; // Position set by caller
 
     uint32_t image_id = ensure_transmitted(path);
-    if (image_id == 0) return 0;
+    if (image_id == 0)
+        return 0;
 
     buf_printf("\x1b_Ga=p,i=%u,z=-2,q=2", image_id);
-    if (max_cols > 0) buf_printf(",c=%d", max_cols);
-    if (max_rows > 0) buf_printf(",r=%d", max_rows);
+    if (max_cols > 0)
+        buf_printf(",c=%d", max_cols);
+    if (max_rows > 0)
+        buf_printf(",r=%d", max_rows);
     buf_append_str("\x1b\\");
 
     int32_t rows_used;
@@ -1765,13 +1975,17 @@ static int32_t posix_image_display(const char *path, int32_t row, int32_t col, i
     return rows_used;
 }
 
-static int32_t posix_image_display_cropped(const char *path, int32_t row, int32_t col, int32_t max_cols,
-                                         int32_t crop_top_rows, int32_t visible_rows) {
-    if (!path) return 0;
-    (void)row; (void)col;
+static int32_t posix_image_display_cropped(const char* path, int32_t row, int32_t col, int32_t max_cols,
+    int32_t crop_top_rows, int32_t visible_rows)
+{
+    if (!path)
+        return 0;
+    (void)row;
+    (void)col;
 
     uint32_t image_id = ensure_transmitted(path);
-    if (image_id == 0) return 0;
+    if (image_id == 0)
+        return 0;
 
     int32_t pixel_w, pixel_h;
     if (!posix_image_get_size(path, &pixel_w, &pixel_h)) {
@@ -1780,17 +1994,22 @@ static int32_t posix_image_display_cropped(const char *path, int32_t row, int32_
 
     int32_t img_rows = posix_image_calc_rows(pixel_w, pixel_h, max_cols, 0);
     int32_t cell_height_px = pixel_h / (img_rows > 0 ? img_rows : 1);
-    if (cell_height_px <= 0) cell_height_px = 20;
+    if (cell_height_px <= 0)
+        cell_height_px = 20;
 
     int32_t crop_y = crop_top_rows * cell_height_px;
     int32_t crop_h = visible_rows * cell_height_px;
 
-    if (crop_y >= pixel_h) return 0;
-    if (crop_y + crop_h > pixel_h) crop_h = pixel_h - crop_y;
+    if (crop_y >= pixel_h)
+        return 0;
+    if (crop_y + crop_h > pixel_h)
+        crop_h = pixel_h - crop_y;
 
     buf_printf("\x1b_Ga=p,i=%u,z=-2,q=2", image_id);
-    if (max_cols > 0) buf_printf(",c=%d", max_cols);
-    if (visible_rows > 0) buf_printf(",r=%d", visible_rows);
+    if (max_cols > 0)
+        buf_printf(",c=%d", max_cols);
+    if (visible_rows > 0)
+        buf_printf(",r=%d", visible_rows);
 
     if (crop_top_rows > 0 || visible_rows < img_rows) {
         buf_printf(",x=0,y=%d,w=%d,h=%d", crop_y, pixel_w, crop_h);
@@ -1806,16 +2025,19 @@ static int32_t posix_image_display_cropped(const char *path, int32_t row, int32_
     return visible_rows;
 }
 
-static void posix_image_frame_start(void) {
+static void posix_image_frame_start(void)
+{
     buf_append_str("\x1b_Ga=d,d=a,q=2\x1b\\");
 }
 
-static void posix_image_frame_end(void) {
-   // buf_flush();
-   // fflush(stdout);
+static void posix_image_frame_end(void)
+{
+    // buf_flush();
+    // fflush(stdout);
 }
 
-static void posix_image_clear_all(void) {
+static void posix_image_clear_all(void)
+{
     buf_append_str("\x1b_Ga=d,d=A,q=2\x1b\\");
     buf_flush();
     fflush(stdout);
@@ -1825,14 +2047,17 @@ static void posix_image_clear_all(void) {
     transmitted_count = 0;
 }
 
-static void posix_image_mask_region(int32_t col, int32_t row, int32_t cols, int32_t rows, DawnColor bg) {
-    if (cols <= 0 || rows <= 0) return;
+static void posix_image_mask_region(int32_t col, int32_t row, int32_t cols, int32_t rows, DawnColor bg)
+{
+    if (cols <= 0 || rows <= 0)
+        return;
 
-    uint8_t pixel[4] = {bg.r, bg.g, bg.b, 255};
+    uint8_t pixel[4] = { bg.r, bg.g, bg.b, 255 };
 
     size_t b64_len;
-    char *b64_data = base64_encode(pixel, 4, &b64_len);
-    if (!b64_data) return;
+    char* b64_data = base64_encode(pixel, 4, &b64_len);
+    if (!b64_data)
+        return;
 
     buf_printf(CSI "%d;%dH", row, col);
     buf_printf("\x1b_Ga=T,f=32,s=1,v=1,c=%d,r=%d,z=-1,q=2;%s\x1b\\", cols, rows, b64_data);
@@ -1841,7 +2066,8 @@ static void posix_image_mask_region(int32_t col, int32_t row, int32_t cols, int3
 }
 
 // Hash function for cache keys (djb2 algorithm)
-static void hash_to_hex(const char *str, char *out_hex) {
+static void hash_to_hex(const char* str, char* out_hex)
+{
     uint64_t hash = 5381;
     int32_t c;
     while ((c = (uint8_t)*str++)) {
@@ -1850,8 +2076,10 @@ static void hash_to_hex(const char *str, char *out_hex) {
     snprintf(out_hex, 65, "%016llx", (unsigned long long)hash);
 }
 
-static bool is_remote_url(const char *path) {
-    if (!path) return false;
+static bool is_remote_url(const char* path)
+{
+    if (!path)
+        return false;
     return (strncmp(path, "http://", 7) == 0 || strncmp(path, "https://", 8) == 0);
 }
 
@@ -1860,47 +2088,54 @@ static bool is_remote_url(const char *path) {
 #define MAX_FAILED_URLS 32
 
 typedef struct {
-    char *url;
-    char *temp_path;
-    char *final_path;
-    FILE *fp;
-    CURL *easy;
+    char* url;
+    char* temp_path;
+    char* final_path;
+    FILE* fp;
+    CURL* easy;
 } AsyncDownload;
 
-static CURLM *curl_multi_handle = NULL;
+static CURLM* curl_multi_handle = NULL;
 static AsyncDownload downloads[MAX_DOWNLOADS];
 static int32_t download_count = 0;
-static char *failed_urls[MAX_FAILED_URLS];
+static char* failed_urls[MAX_FAILED_URLS];
 static int32_t failed_url_count = 0;
 
-static bool is_failed_url(const char *url) {
+static bool is_failed_url(const char* url)
+{
     for (int32_t i = 0; i < failed_url_count; i++) {
-        if (failed_urls[i] && strcmp(failed_urls[i], url) == 0) return true;
+        if (failed_urls[i] && strcmp(failed_urls[i], url) == 0)
+            return true;
     }
     return false;
 }
 
-static void mark_url_failed(const char *url) {
-    if (is_failed_url(url)) return;
+static void mark_url_failed(const char* url)
+{
+    if (is_failed_url(url))
+        return;
     if (failed_url_count >= MAX_FAILED_URLS) {
         free(failed_urls[0]);
-        memmove(&failed_urls[0], &failed_urls[1], sizeof(char *) * (MAX_FAILED_URLS - 1));
+        memmove(&failed_urls[0], &failed_urls[1], sizeof(char*) * (MAX_FAILED_URLS - 1));
         failed_url_count--;
     }
     failed_urls[failed_url_count++] = strdup(url);
 }
 
-static bool is_download_in_progress(const char *url) {
+static bool is_download_in_progress(const char* url)
+{
     for (int32_t i = 0; i < download_count; i++) {
-        if (downloads[i].url && strcmp(downloads[i].url, url) == 0) return true;
+        if (downloads[i].url && strcmp(downloads[i].url, url) == 0)
+            return true;
     }
     return false;
 }
 
-static void finalize_download(AsyncDownload *dl, bool success) {
+static void finalize_download(AsyncDownload* dl, bool success)
+{
     if (success && dl->temp_path && dl->final_path) {
         int32_t w, h, channels;
-        uint8_t *pixels = stbi_load(dl->temp_path, &w, &h, &channels, 4);
+        uint8_t* pixels = stbi_load(dl->temp_path, &w, &h, &channels, 4);
         if (pixels) {
             stbi_write_png(dl->final_path, w, h, 4, pixels, w * 4);
             stbi_image_free(pixels);
@@ -1910,28 +2145,36 @@ static void finalize_download(AsyncDownload *dl, bool success) {
     } else if (dl->url) {
         mark_url_failed(dl->url);
     }
-    if (dl->temp_path) { unlink(dl->temp_path); free(dl->temp_path); }
+    if (dl->temp_path) {
+        unlink(dl->temp_path);
+        free(dl->temp_path);
+    }
     free(dl->final_path);
     free(dl->url);
     memset(dl, 0, sizeof(*dl));
 }
 
-static void poll_downloads(void) {
-    if (!curl_multi_handle || download_count == 0) return;
+static void poll_downloads(void)
+{
+    if (!curl_multi_handle || download_count == 0)
+        return;
 
     int32_t running;
     curl_multi_perform(curl_multi_handle, &running);
 
-    CURLMsg *msg;
+    CURLMsg* msg;
     int32_t msgs_left;
     while ((msg = curl_multi_info_read(curl_multi_handle, &msgs_left))) {
         if (msg->msg == CURLMSG_DONE) {
-            CURL *easy = msg->easy_handle;
+            CURL* easy = msg->easy_handle;
             bool success = (msg->data.result == CURLE_OK);
 
             for (int32_t i = 0; i < download_count; i++) {
                 if (downloads[i].easy == easy) {
-                    if (downloads[i].fp) { fclose(downloads[i].fp); downloads[i].fp = NULL; }
+                    if (downloads[i].fp) {
+                        fclose(downloads[i].fp);
+                        downloads[i].fp = NULL;
+                    }
                     curl_multi_remove_handle(curl_multi_handle, easy);
                     curl_easy_cleanup(easy);
                     finalize_download(&downloads[i], success);
@@ -1944,19 +2187,26 @@ static void poll_downloads(void) {
     }
 }
 
-static bool start_async_download(const char *url, const char *temp_path, const char *final_path) {
-    if (download_count >= MAX_DOWNLOADS) return false;
+static bool start_async_download(const char* url, const char* temp_path, const char* final_path)
+{
+    if (download_count >= MAX_DOWNLOADS)
+        return false;
 
     if (!curl_multi_handle) {
         curl_multi_handle = curl_multi_init();
-        if (!curl_multi_handle) return false;
+        if (!curl_multi_handle)
+            return false;
     }
 
-    FILE *fp = fopen(temp_path, "wb");
-    if (!fp) return false;
+    FILE* fp = fopen(temp_path, "wb");
+    if (!fp)
+        return false;
 
-    CURL *easy = curl_easy_init();
-    if (!easy) { fclose(fp); return false; }
+    CURL* easy = curl_easy_init();
+    if (!easy) {
+        fclose(fp);
+        return false;
+    }
 
     curl_easy_setopt(easy, CURLOPT_URL, url);
     curl_easy_setopt(easy, CURLOPT_WRITEDATA, fp);
@@ -1969,7 +2219,7 @@ static bool start_async_download(const char *url, const char *temp_path, const c
 
     curl_multi_add_handle(curl_multi_handle, easy);
 
-    AsyncDownload *dl = &downloads[download_count++];
+    AsyncDownload* dl = &downloads[download_count++];
     dl->url = strdup(url);
     dl->temp_path = strdup(temp_path);
     dl->final_path = strdup(final_path);
@@ -1979,13 +2229,17 @@ static bool start_async_download(const char *url, const char *temp_path, const c
     return true;
 }
 
-static bool download_url_to_cache(const char *url, char *cached_path, size_t path_size) {
-    if (!url || !cached_path) return false;
-    
-    if (is_failed_url(url)) return false;
+static bool download_url_to_cache(const char* url, char* cached_path, size_t path_size)
+{
+    if (!url || !cached_path)
+        return false;
 
-    const char *home = posix_get_home_dir();
-    if (!home) return false;
+    if (is_failed_url(url))
+        return false;
+
+    const char* home = posix_get_home_dir();
+    if (!home)
+        return false;
 
     char cache_dir[512];
     snprintf(cache_dir, sizeof(cache_dir), "%s/.dawn/image-cache", home);
@@ -1999,12 +2253,14 @@ static bool download_url_to_cache(const char *url, char *cached_path, size_t pat
     // Already cached?
     if (posix_file_exists(cached_path)) {
         int32_t w, h, channels;
-        if (stbi_info(cached_path, &w, &h, &channels)) return true;
+        if (stbi_info(cached_path, &w, &h, &channels))
+            return true;
         unlink(cached_path);
     }
 
     // Already downloading?
-    if (is_download_in_progress(url)) return false;
+    if (is_download_in_progress(url))
+        return false;
 
     // Start async download
     char temp_path[1024];
@@ -2015,20 +2271,23 @@ static bool download_url_to_cache(const char *url, char *cached_path, size_t pat
 }
 
 // Check if file is already PNG by checking magic bytes
-static bool is_png_file(const char *path) {
-    FILE *f = fopen(path, "rb");
-    if (!f) return false;
+static bool is_png_file(const char* path)
+{
+    FILE* f = fopen(path, "rb");
+    if (!f)
+        return false;
     uint8_t header[8];
     size_t n = fread(header, 1, 8, f);
     fclose(f);
-    if (n < 8) return false;
+    if (n < 8)
+        return false;
     // PNG magic: 89 50 4E 47 0D 0A 1A 0A
-    return header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47 &&
-           header[4] == 0x0D && header[5] == 0x0A && header[6] == 0x1A && header[7] == 0x0A;
+    return header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47 && header[4] == 0x0D && header[5] == 0x0A && header[6] == 0x1A && header[7] == 0x0A;
 }
 
 // Convert a local image file to PNG in cache if not already PNG
-static bool ensure_png_cached(const char *src_path, char *out, size_t out_size) {
+static bool ensure_png_cached(const char* src_path, char* out, size_t out_size)
+{
     assert(src_path && out && out_size > 0);
 
     // If already PNG, just return the original path
@@ -2039,7 +2298,7 @@ static bool ensure_png_cached(const char *src_path, char *out, size_t out_size) 
     }
 
     // Need to convert - get cache directory
-    const char *home = posix_get_home_dir();
+    const char* home = posix_get_home_dir();
     assert(home && "Failed to get home directory");
 
     char cache_dir[512];
@@ -2048,7 +2307,7 @@ static bool ensure_png_cached(const char *src_path, char *out, size_t out_size) 
 
     // Use absolute path + mtime as cache key
     char abs_path[PATH_MAX];
-    char *resolved = realpath(src_path, abs_path);
+    char* resolved = realpath(src_path, abs_path);
     (void)resolved;
     assert(resolved && "realpath failed for image path");
 
@@ -2070,7 +2329,7 @@ static bool ensure_png_cached(const char *src_path, char *out, size_t out_size) 
 
     // Load and convert to PNG
     int32_t w, h, channels;
-    uint8_t *pixels = stbi_load(src_path, &w, &h, &channels, 4);
+    uint8_t* pixels = stbi_load(src_path, &w, &h, &channels, 4);
     assert(pixels && "Failed to load image");
 
     int32_t write_ok = stbi_write_png(out, w, h, 4, pixels, w * 4);
@@ -2081,9 +2340,11 @@ static bool ensure_png_cached(const char *src_path, char *out, size_t out_size) 
     return true;
 }
 
-static bool posix_image_resolve_path(const char *raw_path, const char *base_dir,
-                                       char *out, size_t out_size) {
-    if (!raw_path || !out || out_size == 0) return false;
+static bool posix_image_resolve_path(const char* raw_path, const char* base_dir,
+    char* out, size_t out_size)
+{
+    if (!raw_path || !out || out_size == 0)
+        return false;
 
     if (is_remote_url(raw_path)) {
         return download_url_to_cache(raw_path, out, out_size);
@@ -2101,7 +2362,7 @@ static bool posix_image_resolve_path(const char *raw_path, const char *base_dir,
 
     // Home directory expansion
     if (raw_path[0] == '~') {
-        const char *home = posix_get_home_dir();
+        const char* home = posix_get_home_dir();
         if (home) {
             snprintf(resolved, sizeof(resolved), "%s%s", home, raw_path + 1);
             if (posix_file_exists(resolved)) {
@@ -2127,25 +2388,31 @@ static bool posix_image_resolve_path(const char *raw_path, const char *base_dir,
     return false;
 }
 
-static int32_t posix_image_calc_rows(int32_t pixel_width, int32_t pixel_height, int32_t max_cols, int32_t max_rows) {
-    if (pixel_width <= 0 || pixel_height <= 0) return 1;
-    if (max_rows > 0) return max_rows;
-    if (max_cols <= 0) max_cols = 40;
+static int32_t posix_image_calc_rows(int32_t pixel_width, int32_t pixel_height, int32_t max_cols, int32_t max_rows)
+{
+    if (pixel_width <= 0 || pixel_height <= 0)
+        return 1;
+    if (max_rows > 0)
+        return max_rows;
+    if (max_cols <= 0)
+        max_cols = 40;
 
     double aspect = (double)pixel_height / (double)pixel_width;
     int32_t rows = (int32_t)(max_cols * aspect * 0.5 + 0.5);
 
-    if (rows < 1) rows = 1;
+    if (rows < 1)
+        rows = 1;
     return rows;
 }
 
-static void posix_image_invalidate(const char *path) {
+static void posix_image_invalidate(const char* path)
+{
     for (int32_t i = 0; i < transmitted_count; i++) {
         if (transmitted_images[i].path && strcmp(transmitted_images[i].path, path) == 0) {
             buf_printf("\x1b_Ga=d,d=I,i=%u,q=2\x1b\\", transmitted_images[i].image_id);
             free(transmitted_images[i].path);
             memmove(&transmitted_images[i], &transmitted_images[i + 1],
-                    sizeof(TransmittedImage) * (transmitted_count - i - 1));
+                sizeof(TransmittedImage) * (transmitted_count - i - 1));
             transmitted_count--;
             i--;
         }
@@ -2154,7 +2421,8 @@ static void posix_image_invalidate(const char *path) {
     fflush(stdout);
 }
 
-static void posix_execute_pending_jobs(void) {
+static void posix_execute_pending_jobs(void)
+{
     poll_downloads();
 }
 

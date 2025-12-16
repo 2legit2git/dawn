@@ -7,14 +7,16 @@
 
 // #region Initialization
 
-void search_init(SearchState *state) {
+void search_init(SearchState* state)
+{
     memset(state, 0, sizeof(SearchState));
     state->case_sensitive = false;
     state->dirty = false;
     state->last_change_time = 0;
 }
 
-void search_mark_dirty(SearchState *state, int64_t now_ms) {
+void search_mark_dirty(SearchState* state, int64_t now_ms)
+{
     state->dirty = true;
     state->last_change_time = now_ms;
 }
@@ -24,16 +26,20 @@ void search_mark_dirty(SearchState *state, int64_t now_ms) {
 // #region Case-Insensitive Matching
 
 //! Case-insensitive character comparison
-static inline bool char_eq(char a, char b, bool case_sensitive) {
-    if (case_sensitive) return a == b;
+static inline bool char_eq(char a, char b, bool case_sensitive)
+{
+    if (case_sensitive)
+        return a == b;
     return TOLOWER_(a) == TOLOWER_(b);
 }
 
 //! Find needle in gap buffer starting at pos
 //! @return position of match or SIZE_MAX if not found
-static size_t find_match(const GapBuffer *gb, size_t start, const char *needle, int32_t needle_len, bool case_sensitive) {
+static size_t find_match(const GapBuffer* gb, size_t start, const char* needle, int32_t needle_len, bool case_sensitive)
+{
     size_t len = gap_len(gb);
-    if (needle_len == 0 || start + (size_t)needle_len > len) return SIZE_MAX;
+    if (needle_len == 0 || start + (size_t)needle_len > len)
+        return SIZE_MAX;
 
     for (size_t pos = start; pos + (size_t)needle_len <= len; pos++) {
         bool found = true;
@@ -43,7 +49,8 @@ static size_t find_match(const GapBuffer *gb, size_t start, const char *needle, 
                 break;
             }
         }
-        if (found) return pos;
+        if (found)
+            return pos;
     }
     return SIZE_MAX;
 }
@@ -53,7 +60,8 @@ static size_t find_match(const GapBuffer *gb, size_t start, const char *needle, 
 // #region Context Building
 
 //! Build context string around a match
-static void build_context(const GapBuffer *gb, SearchResult *r) {
+static void build_context(const GapBuffer* gb, SearchResult* r)
+{
     size_t len = gap_len(gb);
     size_t ctx_start = r->pos;
     size_t ctx_end = r->pos + r->len;
@@ -72,7 +80,8 @@ static void build_context(const GapBuffer *gb, SearchResult *r) {
     int32_t chars_after = 0;
     while (ctx_end < len && chars_after < SEARCH_CONTEXT_CHARS) {
         char c = gap_at(gb, ctx_end);
-        if (c == '\n') break;
+        if (c == '\n')
+            break;
         ctx_end++;
         chars_after++;
     }
@@ -105,10 +114,12 @@ static void build_context(const GapBuffer *gb, SearchResult *r) {
 }
 
 //! Count newlines between two positions (for incremental line counting)
-static int32_t count_newlines_between(const GapBuffer *gb, size_t from, size_t to) {
+static int32_t count_newlines_between(const GapBuffer* gb, size_t from, size_t to)
+{
     int32_t count = 0;
     for (size_t p = from; p < to; p++) {
-        if (gap_at(gb, p) == '\n') count++;
+        if (gap_at(gb, p) == '\n')
+            count++;
     }
     return count;
 }
@@ -117,10 +128,13 @@ static int32_t count_newlines_between(const GapBuffer *gb, size_t from, size_t t
 
 // #region Search Operations
 
-bool search_find(const GapBuffer *gb, SearchState *state, int64_t now_ms) {
+bool search_find(const GapBuffer* gb, SearchState* state, int64_t now_ms)
+{
     // Debounce: only search if dirty and enough time has passed
-    if (!state->dirty) return false;
-    if (now_ms - state->last_change_time < SEARCH_DEBOUNCE_MS) return false;
+    if (!state->dirty)
+        return false;
+    if (now_ms - state->last_change_time < SEARCH_DEBOUNCE_MS)
+        return false;
 
     // Clear dirty flag and perform search
     state->dirty = false;
@@ -128,7 +142,8 @@ bool search_find(const GapBuffer *gb, SearchState *state, int64_t now_ms) {
     state->selected = 0;
     state->scroll = 0;
 
-    if (state->query_len == 0) return true;
+    if (state->query_len == 0)
+        return true;
 
     size_t pos = 0;
     size_t last_pos = 0;
@@ -136,9 +151,10 @@ bool search_find(const GapBuffer *gb, SearchState *state, int64_t now_ms) {
 
     while (state->count < SEARCH_MAX_RESULTS) {
         pos = find_match(gb, pos, state->query, state->query_len, state->case_sensitive);
-        if (pos == SIZE_MAX) break;
+        if (pos == SIZE_MAX)
+            break;
 
-        SearchResult *r = &state->results[state->count];
+        SearchResult* r = &state->results[state->count];
         r->pos = pos;
         r->len = (size_t)state->query_len;
 
@@ -156,42 +172,53 @@ bool search_find(const GapBuffer *gb, SearchState *state, int64_t now_ms) {
     return true;
 }
 
-const SearchResult *search_get_selected(const SearchState *state) {
-    if (state->count == 0) return NULL;
+const SearchResult* search_get_selected(const SearchState* state)
+{
+    if (state->count == 0)
+        return NULL;
     return &state->results[state->selected];
 }
 
-size_t search_next(const GapBuffer *gb, const SearchState *state, size_t cursor) {
-    if (state->query_len == 0) return cursor;
+size_t search_next(const GapBuffer* gb, const SearchState* state, size_t cursor)
+{
+    if (state->query_len == 0)
+        return cursor;
 
     size_t pos = find_match(gb, cursor + 1, state->query, state->query_len, state->case_sensitive);
-    if (pos != SIZE_MAX) return pos;
+    if (pos != SIZE_MAX)
+        return pos;
 
     pos = find_match(gb, 0, state->query, state->query_len, state->case_sensitive);
-    if (pos != SIZE_MAX) return pos;
+    if (pos != SIZE_MAX)
+        return pos;
 
     return cursor;
 }
 
-size_t search_prev(const GapBuffer *gb, const SearchState *state, size_t cursor) {
-    if (state->query_len == 0) return cursor;
+size_t search_prev(const GapBuffer* gb, const SearchState* state, size_t cursor)
+{
+    if (state->query_len == 0)
+        return cursor;
 
     size_t best = SIZE_MAX;
     size_t pos = 0;
     while (pos < cursor) {
         pos = find_match(gb, pos, state->query, state->query_len, state->case_sensitive);
-        if (pos == SIZE_MAX || pos >= cursor) break;
+        if (pos == SIZE_MAX || pos >= cursor)
+            break;
         best = pos;
         pos++;
     }
 
-    if (best != SIZE_MAX) return best;
+    if (best != SIZE_MAX)
+        return best;
 
     size_t len = gap_len(gb);
     pos = cursor;
     while (pos < len) {
         pos = find_match(gb, pos, state->query, state->query_len, state->case_sensitive);
-        if (pos == SIZE_MAX) break;
+        if (pos == SIZE_MAX)
+            break;
         best = pos;
         pos++;
     }

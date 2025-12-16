@@ -21,10 +21,10 @@ void set_bg(DawnColor c);
 void move_to(int32_t r, int32_t c);
 
 //! Write a string to output
-void out_str(const char *str);
+void out_str(const char* str);
 
 //! Write a string with explicit length
-void out_str_n(const char *str, size_t len);
+void out_str_n(const char* str, size_t len);
 
 //! Write a single character
 void out_char(char c);
@@ -133,7 +133,7 @@ void reset_attrs(void);
 //! Underline style types (for compatibility)
 typedef DawnUnderline UnderlineStyle;
 #define UNDERLINE_STYLE_SINGLE DAWN_UNDERLINE_SINGLE
-#define UNDERLINE_STYLE_CURLY  DAWN_UNDERLINE_CURLY
+#define UNDERLINE_STYLE_CURLY DAWN_UNDERLINE_CURLY
 #define UNDERLINE_STYLE_DOTTED DAWN_UNDERLINE_DOTTED
 #define UNDERLINE_STYLE_DASHED DAWN_UNDERLINE_DASHED
 
@@ -163,7 +163,7 @@ void print_scaled_char(char c, int32_t scale);
 //! @param len length of string
 //! @param scale integer scale 1-7 (1 = normal, 2 = double, etc.)
 //! Falls back to normal print if platform doesn't support text sizing
-void print_scaled_str(const char *str, size_t len, int32_t scale);
+void print_scaled_str(const char* str, size_t len, int32_t scale);
 
 //! Print a single character at fractionally scaled size
 //! Uses Kitty text sizing protocol: effective size = scale * (num/denom)
@@ -182,7 +182,7 @@ void print_scaled_frac_char(char c, int32_t scale, int32_t num, int32_t denom);
 //! @param num fractional numerator (0-15, 0 = no fraction)
 //! @param denom fractional denominator (0-15, must be > num when non-zero)
 //! Falls back to integer scaling or normal print if not supported
-void print_scaled_frac_str(const char *str, size_t len, int32_t scale, int32_t num, int32_t denom);
+void print_scaled_frac_str(const char* str, size_t len, int32_t scale, int32_t num, int32_t denom);
 
 // #endregion
 

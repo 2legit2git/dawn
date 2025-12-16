@@ -17,4 +17,4 @@ static const hl_lang_def_t lang = {
     .detect_count = 0,
 };
 
-const hl_lang_def_t *hl_lang_csv(void) { return &lang; }
+const hl_lang_def_t* hl_lang_csv(void) { return &lang; }

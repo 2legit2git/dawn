@@ -42,4 +42,4 @@ static const hl_lang_def_t lang = {
     .detect_count = sizeof(detect) / sizeof(detect[0]),
 };
 
-const hl_lang_def_t *hl_lang_js(void) { return &lang; }
+const hl_lang_def_t* hl_lang_js(void) { return &lang; }

@@ -9,7 +9,7 @@
 
 //! Get path to history/sessions directory
 //! @return static buffer with path to ~/.dawn
-char *history_dir(void);
+char* history_dir(void);
 
 // #endregion
 
@@ -26,7 +26,7 @@ void load_history(void);
 
 //! Load AI chat history for a session
 //! @param session_path path to the .md session file
-void load_chat_history(const char *session_path);
+void load_chat_history(const char* session_path);
 
 // #endregion
 
@@ -34,16 +34,16 @@ void load_chat_history(const char *session_path);
 
 //! Load a file for editing, parsing frontmatter
 //! @param path path to the .md file to open
-void load_file_for_editing(const char *path);
+void load_file_for_editing(const char* path);
 
 //! Load content from buffer for editing, parsing frontmatter
 //! @param content buffer containing markdown content
 //! @param size size of content buffer
-void load_buffer_for_editing(const char *content, size_t size);
+void load_buffer_for_editing(const char* content, size_t size);
 
 //! Reveal a file in system file manager
 //! @param path path to the file to reveal
-void open_in_finder(const char *path);
+void open_in_finder(const char* path);
 
 // #endregion
 

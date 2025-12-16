@@ -4,29 +4,33 @@
 
 // #region Core Operations
 
-void gap_init(GapBuffer *gb, size_t size) {
+void gap_init(GapBuffer* gb, size_t size)
+{
     gb->buffer_size = size;
     gb->buffer = malloc(size);
     gb->gap_start = 0;
     gb->gap_end = size;
 }
 
-void gap_free(GapBuffer *gb) {
+void gap_free(GapBuffer* gb)
+{
     free(gb->buffer);
     gb->buffer = NULL;
 }
 
-size_t gap_len(const GapBuffer *gb) {
+size_t gap_len(const GapBuffer* gb)
+{
     return gb->buffer_size - (gb->gap_end - gb->gap_start);
 }
 
 //! Expand buffer to accommodate more text
 //! @param gb gap buffer to expand
 //! @param need minimum additional bytes needed
-static void gap_expand(GapBuffer *gb, size_t need) {
+static void gap_expand(GapBuffer* gb, size_t need)
+{
     size_t after = gb->buffer_size - gb->gap_end;
     size_t new_size = gb->buffer_size + need + GAP_BUFFER_GAP_SIZE;
-    char *new_buf = malloc(new_size);
+    char* new_buf = malloc(new_size);
 
     memcpy(new_buf, gb->buffer, gb->gap_start);
     size_t new_gap_end = new_size - after;
@@ -41,9 +45,11 @@ static void gap_expand(GapBuffer *gb, size_t need) {
 //! Move gap to specified position
 //! @param gb gap buffer to modify
 //! @param pos target position for gap
-static void gap_move(GapBuffer *gb, size_t pos) {
+static void gap_move(GapBuffer* gb, size_t pos)
+{
     size_t len = gap_len(gb);
-    if (pos > len) pos = len;
+    if (pos > len)
+        pos = len;
 
     if (pos < gb->gap_start) {
         size_t n = gb->gap_start - pos;
@@ -58,49 +64,66 @@ static void gap_move(GapBuffer *gb, size_t pos) {
     }
 }
 
-void gap_insert(GapBuffer *gb, size_t pos, char c) {
+void gap_insert(GapBuffer* gb, size_t pos, char c)
+{
     gap_move(gb, pos);
-    if (gb->gap_start >= gb->gap_end) gap_expand(gb, 1);
+    if (gb->gap_start >= gb->gap_end)
+        gap_expand(gb, 1);
     gb->buffer[gb->gap_start++] = c;
 }
 
-void gap_insert_str(GapBuffer *gb, size_t pos, const char *s, size_t n) {
+void gap_insert_str(GapBuffer* gb, size_t pos, const char* s, size_t n)
+{
     gap_move(gb, pos);
-    if (gb->gap_end - gb->gap_start < n) gap_expand(gb, n);
+    if (gb->gap_end - gb->gap_start < n)
+        gap_expand(gb, n);
     memcpy(gb->buffer + gb->gap_start, s, n);
     gb->gap_start += n;
 }
 
-void gap_delete(GapBuffer *gb, size_t pos, size_t n) {
+void gap_delete(GapBuffer* gb, size_t pos, size_t n)
+{
     size_t len = gap_len(gb);
-    if (pos >= len) return;
-    if (pos + n > len) n = len - pos;
+    if (pos >= len)
+        return;
+    if (pos + n > len)
+        n = len - pos;
     gap_move(gb, pos);
     gb->gap_end += n;
 }
 
-char gap_at(const GapBuffer *gb, size_t pos) {
-    if (pos >= gap_len(gb)) return '\0';
+char gap_at(const GapBuffer* gb, size_t pos)
+{
+    if (pos >= gap_len(gb))
+        return '\0';
     return pos < gb->gap_start ? gb->buffer[pos] : gb->buffer[gb->gap_end + pos - gb->gap_start];
 }
 
-char *gap_to_str(const GapBuffer *gb) {
+char* gap_to_str(const GapBuffer* gb)
+{
     size_t len = gap_len(gb);
-    char *s = malloc(len + 1);
+    char* s = malloc(len + 1);
     memcpy(s, gb->buffer, gb->gap_start);
     memcpy(s + gb->gap_start, gb->buffer + gb->gap_end, gb->buffer_size - gb->gap_end);
     s[len] = '\0';
     return s;
 }
 
-char *gap_substr(const GapBuffer *gb, size_t start, size_t end) {
+char* gap_substr(const GapBuffer* gb, size_t start, size_t end)
+{
     size_t len = gap_len(gb);
-    if (start > len) start = len;
-    if (end > len) end = len;
-    if (start > end) { size_t t = start; start = end; end = t; }
+    if (start > len)
+        start = len;
+    if (end > len)
+        end = len;
+    if (start > end) {
+        size_t t = start;
+        start = end;
+        end = t;
+    }
 
     size_t n = end - start;
-    char *s = malloc(n + 1);
+    char* s = malloc(n + 1);
 
     // Optimize: use memcpy for contiguous regions instead of byte-by-byte
     if (end <= gb->gap_start) {
@@ -121,7 +144,8 @@ char *gap_substr(const GapBuffer *gb, size_t start, size_t end) {
     return s;
 }
 
-void gap_copy_to(const GapBuffer *gb, size_t start, size_t count, char *dest) {
+void gap_copy_to(const GapBuffer* gb, size_t start, size_t count, char* dest)
+{
     size_t end = start + count;
 
     // Optimize: use memcpy for contiguous regions instead of byte-by-byte
@@ -144,8 +168,10 @@ void gap_copy_to(const GapBuffer *gb, size_t start, size_t count, char *dest) {
 
 // #region UTF-8 Operations
 
-size_t gap_utf8_prev(const GapBuffer *gb, size_t pos) {
-    if (pos == 0) return 0;
+size_t gap_utf8_prev(const GapBuffer* gb, size_t pos)
+{
+    if (pos == 0)
+        return 0;
     pos--;
     // Walk back past continuation bytes (10xxxxxx)
     while (pos > 0 && (gap_at(gb, pos) & 0xC0) == 0x80) {
@@ -154,22 +180,27 @@ size_t gap_utf8_prev(const GapBuffer *gb, size_t pos) {
     return pos;
 }
 
-size_t gap_utf8_next(const GapBuffer *gb, size_t pos) {
+size_t gap_utf8_next(const GapBuffer* gb, size_t pos)
+{
     size_t len = gap_len(gb);
-    if (pos >= len) return len;
+    if (pos >= len)
+        return len;
 
     uint8_t c = (uint8_t)gap_at(gb, pos);
     int32_t char_len = utf8proc_utf8class[c];
-    if (char_len < 1) char_len = 1;
+    if (char_len < 1)
+        char_len = 1;
 
     size_t new_pos = pos + (size_t)char_len;
     return new_pos > len ? len : new_pos;
 }
 
-int32_t gap_utf8_at(const GapBuffer *gb, size_t pos, size_t *char_len) {
+int32_t gap_utf8_at(const GapBuffer* gb, size_t pos, size_t* char_len)
+{
     size_t len = gap_len(gb);
     if (pos >= len) {
-        if (char_len) *char_len = 0;
+        if (char_len)
+            *char_len = 0;
         return -1;
     }
 
@@ -177,7 +208,7 @@ int32_t gap_utf8_at(const GapBuffer *gb, size_t pos, size_t *char_len) {
     size_t available = len - pos;
     size_t to_read = available < 4 ? available : 4;
 
-    const utf8proc_uint8_t *ptr;
+    const utf8proc_uint8_t* ptr;
     utf8proc_uint8_t buf[4];
 
     if (pos < gb->gap_start) {
@@ -185,7 +216,7 @@ int32_t gap_utf8_at(const GapBuffer *gb, size_t pos, size_t *char_len) {
         size_t before_gap = gb->gap_start - pos;
         if (before_gap >= to_read) {
             // All bytes before gap - use direct pointer (no copy)
-            ptr = (const utf8proc_uint8_t *)(gb->buffer + pos);
+            ptr = (const utf8proc_uint8_t*)(gb->buffer + pos);
         } else {
             // Spans gap - must copy
             memcpy(buf, gb->buffer + pos, before_gap);
@@ -194,18 +225,20 @@ int32_t gap_utf8_at(const GapBuffer *gb, size_t pos, size_t *char_len) {
         }
     } else {
         // After gap - use direct pointer (no copy)
-        ptr = (const utf8proc_uint8_t *)(gb->buffer + gb->gap_end + (pos - gb->gap_start));
+        ptr = (const utf8proc_uint8_t*)(gb->buffer + gb->gap_end + (pos - gb->gap_start));
     }
 
     utf8proc_int32_t codepoint;
     utf8proc_ssize_t bytes = utf8proc_iterate(ptr, (utf8proc_ssize_t)to_read, &codepoint);
 
     if (bytes < 0) {
-        if (char_len) *char_len = 1;
+        if (char_len)
+            *char_len = 1;
         return (uint8_t)*ptr;
     }
 
-    if (char_len) *char_len = (size_t)bytes;
+    if (char_len)
+        *char_len = (size_t)bytes;
     return codepoint;
 }
 

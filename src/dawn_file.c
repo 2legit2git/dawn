@@ -5,24 +5,25 @@
 #endif
 
 #include "dawn_file.h"
-#include "dawn_fm.h"
-#include "dawn_history.h"
-#include "dawn_gap.h"
+#include "cJSON.h"
 #include "dawn_block.h"
 #include "dawn_chat.h"
-#include "dawn_utils.h"
+#include "dawn_fm.h"
+#include "dawn_gap.h"
+#include "dawn_history.h"
 #include "dawn_image.h"
-#include "cJSON.h"
-#include <string.h>
+#include "dawn_utils.h"
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <limits.h>
+#include <string.h>
 
 // #region History Directory
 
-char *history_dir(void) {
+char* history_dir(void)
+{
     static char path[PATH_MAX];
-    const char *home = DAWN_BACKEND(app)->home_dir();
+    const char* home = DAWN_BACKEND(app)->home_dir();
     snprintf(path, sizeof(path), "%s/%s", home ? home : "/tmp", HISTORY_DIR_NAME);
     return path;
 }
@@ -32,7 +33,8 @@ char *history_dir(void) {
 // #region User Info
 
 //! Get current user's display name for document metadata
-static const char *get_username(void) {
+static const char* get_username(void)
+{
     return DAWN_BACKEND(app)->username();
 }
 
@@ -40,14 +42,16 @@ static const char *get_username(void) {
 
 // #region Session Persistence
 
-void save_session(void) {
-    if (gap_len(&app.text) == 0 || !app.session_path) return;
+void save_session(void)
+{
+    if (gap_len(&app.text) == 0 || !app.session_path)
+        return;
 
-    char *txt = gap_to_str(&app.text);
+    char* txt = gap_to_str(&app.text);
     size_t txt_len = strlen(txt);
 
     // Ensure we have frontmatter
-    Frontmatter *fm = app.frontmatter;
+    Frontmatter* fm = app.frontmatter;
     if (!fm) {
         fm = fm_create();
         app.frontmatter = fm;
@@ -66,16 +70,16 @@ void save_session(void) {
     DAWN_BACKEND(app)->localtime(&lt);
     char date_buf[32];
     snprintf(date_buf, sizeof(date_buf), "%04d-%02d-%02dT%02d:%02d:%02dZ",
-             lt.year, lt.mon + 1, lt.mday, lt.hour, lt.min, lt.sec);
+        lt.year, lt.mon + 1, lt.mday, lt.hour, lt.min, lt.sec);
     fm_set_string(fm, "date", date_buf);
 
     // Serialize frontmatter
     size_t fm_len = 0;
-    char *fm_str = fm_to_string(fm, &fm_len);
+    char* fm_str = fm_to_string(fm, &fm_len);
 
     // Build final content
     size_t total = (fm_str ? fm_len : 0) + 1 + txt_len;
-    char *content = malloc(total + 1);
+    char* content = malloc(total + 1);
 
     size_t pos = 0;
     if (fm_str) {
@@ -103,16 +107,16 @@ void save_session(void) {
         char chat_path[520];
         get_chat_path(app.session_path, chat_path, sizeof(chat_path));
 
-        cJSON *root = cJSON_CreateArray();
+        cJSON* root = cJSON_CreateArray();
         for (int32_t i = 0; i < app.chat_count; i++) {
-            ChatMessage *m = &app.chat_msgs[i];
-            cJSON *msg = cJSON_CreateObject();
+            ChatMessage* m = &app.chat_msgs[i];
+            cJSON* msg = cJSON_CreateObject();
             cJSON_AddStringToObject(msg, "role", m->is_user ? "user" : "assistant");
             cJSON_AddStringToObject(msg, "content", m->text);
             cJSON_AddItemToArray(root, msg);
         }
 
-        char *json = cJSON_Print(root);
+        char* json = cJSON_Print(root);
         cJSON_Delete(root);
 
         if (json) {
@@ -122,27 +126,32 @@ void save_session(void) {
     }
 }
 
-void load_history(void) {
+void load_history(void)
+{
     hist_load();
 }
 
-void load_chat_history(const char *session_path) {
+void load_chat_history(const char* session_path)
+{
     char chat_path[520];
     get_chat_path(session_path, chat_path, sizeof(chat_path));
 
     size_t size;
-    char *json_str = DAWN_BACKEND(app)->read_file(chat_path, &size);
-    if (!json_str) return;
+    char* json_str = DAWN_BACKEND(app)->read_file(chat_path, &size);
+    if (!json_str)
+        return;
 
-    cJSON *root = cJSON_Parse(json_str);
+    cJSON* root = cJSON_Parse(json_str);
     free(json_str);
-    if (!root) return;
+    if (!root)
+        return;
 
     if (cJSON_IsArray(root)) {
-        cJSON *msg;
-        cJSON_ArrayForEach(msg, root) {
-            cJSON *role = cJSON_GetObjectItem(msg, "role");
-            cJSON *content = cJSON_GetObjectItem(msg, "content");
+        cJSON* msg;
+        cJSON_ArrayForEach(msg, root)
+        {
+            cJSON* role = cJSON_GetObjectItem(msg, "role");
+            cJSON* content = cJSON_GetObjectItem(msg, "content");
             if (cJSON_IsString(role) && cJSON_IsString(content)) {
                 bool is_user = strcmp(role->valuestring, "user") == 0;
                 chat_add(content->valuestring, is_user);
@@ -161,15 +170,16 @@ void load_chat_history(const char *session_path) {
 //! @param content buffer containing markdown content (will be modified)
 //! @param size size of content buffer
 //! @param path optional file path (NULL for stdin)
-static void load_content(char *content, size_t size, const char *path) {
+static void load_content(char* content, size_t size, const char* path)
+{
     // Free old frontmatter
     fm_free(app.frontmatter);
     app.frontmatter = NULL;
 
     // Parse frontmatter
-    const char *text_start = content;
+    const char* text_start = content;
     size_t consumed = 0;
-    Frontmatter *fm = fm_parse(content, size, &consumed);
+    Frontmatter* fm = fm_parse(content, size, &consumed);
     if (fm) {
         app.frontmatter = fm;
         text_start = content + consumed;
@@ -181,7 +191,7 @@ static void load_content(char *content, size_t size, const char *path) {
     size_t text_len = strlen(text_start);
     if (text_len > 0) {
         // Need mutable copy for normalize
-        char *mutable_text = strdup(text_start);
+        char* mutable_text = strdup(text_start);
         text_len = normalize_line_endings(mutable_text, text_len);
         gap_insert_str(&app.text, 0, mutable_text, text_len);
         free(mutable_text);
@@ -211,31 +221,36 @@ static void load_content(char *content, size_t size, const char *path) {
         load_chat_history(path);
     }
 
-    #if HAS_LIBAI
+#if HAS_LIBAI
     if (app.ai_ready && !app.ai_session) {
         ai_init_session();
     }
-    #endif
+#endif
 
-    const char *title = fm_get_string(app.frontmatter, "title");
+    const char* title = fm_get_string(app.frontmatter, "title");
     DAWN_BACKEND(app)->set_title(title);
 }
 
-void load_file_for_editing(const char *path) {
+void load_file_for_editing(const char* path)
+{
     size_t size;
-    char *content = DAWN_BACKEND(app)->read_file(path, &size);
-    if (!content) return;
+    char* content = DAWN_BACKEND(app)->read_file(path, &size);
+    if (!content)
+        return;
 
     load_content(content, size, path);
     free(content);
 }
 
-void load_buffer_for_editing(const char *content, size_t size) {
-    if (!content || size == 0) return;
+void load_buffer_for_editing(const char* content, size_t size)
+{
+    if (!content || size == 0)
+        return;
 
     // Make a mutable copy
-    char *buf = malloc(size + 1);
-    if (!buf) return;
+    char* buf = malloc(size + 1);
+    if (!buf)
+        return;
     memcpy(buf, content, size);
     buf[size] = '\0';
 
@@ -243,7 +258,8 @@ void load_buffer_for_editing(const char *content, size_t size) {
     free(buf);
 }
 
-void open_in_finder(const char *path) {
+void open_in_finder(const char* path)
+{
     DAWN_BACKEND(app)->reveal(path);
 }
 

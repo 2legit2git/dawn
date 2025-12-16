@@ -2,16 +2,16 @@
 
 #include "dawn_footnote.h"
 #include "dawn_md.h"
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 
 // #region Types
 
 //! Footnote tracking for navigation
 typedef struct {
-    char id[64];       //!< Footnote identifier
-    size_t ref_pos;    //!< Position of first reference
-    size_t def_pos;    //!< Position of definition, or SIZE_MAX if none
+    char id[64]; //!< Footnote identifier
+    size_t ref_pos; //!< Position of first reference
+    size_t def_pos; //!< Position of definition, or SIZE_MAX if none
 } FootnoteInfo;
 
 // #endregion
@@ -22,10 +22,11 @@ typedef struct {
 //! @param gb gap buffer to scan
 //! @param count output: number of footnotes found
 //! @return array of FootnoteInfo (caller must free)
-static FootnoteInfo *scan_footnotes(GapBuffer *gb, int32_t *count) {
+static FootnoteInfo* scan_footnotes(GapBuffer* gb, int32_t* count)
+{
     *count = 0;
     size_t len = gap_len(gb);
-    FootnoteInfo *notes = NULL;
+    FootnoteInfo* notes = NULL;
     int32_t capacity = 0;
 
     // First pass: find all references
@@ -92,9 +93,10 @@ static FootnoteInfo *scan_footnotes(GapBuffer *gb, int32_t *count) {
 //! Create missing footnote definitions at end of document
 //! @param gb gap buffer to modify
 //! @return position of first new definition, or SIZE_MAX if none created
-static size_t create_missing_footnotes(GapBuffer *gb) {
+static size_t create_missing_footnotes(GapBuffer* gb)
+{
     int32_t count;
-    FootnoteInfo *notes = scan_footnotes(gb, &count);
+    FootnoteInfo* notes = scan_footnotes(gb, &count);
     if (!notes || count == 0) {
         free(notes);
         return SIZE_MAX;
@@ -103,7 +105,8 @@ static size_t create_missing_footnotes(GapBuffer *gb) {
     // Find which ones are missing
     int32_t missing = 0;
     for (int32_t i = 0; i < count; i++) {
-        if (notes[i].def_pos == SIZE_MAX) missing++;
+        if (notes[i].def_pos == SIZE_MAX)
+            missing++;
     }
 
     if (missing == 0) {
@@ -126,8 +129,8 @@ static size_t create_missing_footnotes(GapBuffer *gb) {
     }
 
     // Add separator
-    const char *sep = "---\n\n";
-    for (const char *p = sep; *p; p++) {
+    const char* sep = "---\n\n";
+    for (const char* p = sep; *p; p++) {
         gap_insert(gb, insert_pos, *p);
         insert_pos++;
     }
@@ -144,7 +147,7 @@ static size_t create_missing_footnotes(GapBuffer *gb) {
             insert_pos++;
             gap_insert(gb, insert_pos, '^');
             insert_pos++;
-            for (const char *p = notes[i].id; *p; p++) {
+            for (const char* p = notes[i].id; *p; p++) {
                 gap_insert(gb, insert_pos, *p);
                 insert_pos++;
             }
@@ -169,7 +172,8 @@ static size_t create_missing_footnotes(GapBuffer *gb) {
 
 // #region Footnote Navigation
 
-void footnote_jump(GapBuffer *gb, size_t *cursor) {
+void footnote_jump(GapBuffer* gb, size_t* cursor)
+{
     size_t len = gap_len(gb);
     size_t cur = *cursor;
 
@@ -237,7 +241,7 @@ void footnote_jump(GapBuffer *gb, size_t *cursor) {
                 *cursor = check_pos;
                 footnote_jump(gb, cursor);
                 if (*cursor == check_pos) {
-                    *cursor = saved;  // Restore if jump failed
+                    *cursor = saved; // Restore if jump failed
                 }
                 return;
             }
@@ -280,7 +284,8 @@ void footnote_jump(GapBuffer *gb, size_t *cursor) {
     }
 }
 
-bool footnote_create_definition(GapBuffer *gb, const char *id) {
+bool footnote_create_definition(GapBuffer* gb, const char* id)
+{
     size_t len = gap_len(gb);
 
     // Check if definition already exists
@@ -294,7 +299,7 @@ bool footnote_create_definition(GapBuffer *gb, const char *id) {
             }
             def_id[dl] = '\0';
             if (strcmp(id, def_id) == 0) {
-                return false;  // Already exists
+                return false; // Already exists
             }
         }
     }
@@ -321,8 +326,8 @@ bool footnote_create_definition(GapBuffer *gb, const char *id) {
 
     // Add separator if this is the first footnote
     if (first_footnote) {
-        const char *sep = "---\n\n";
-        for (const char *p = sep; *p; p++) {
+        const char* sep = "---\n\n";
+        for (const char* p = sep; *p; p++) {
             gap_insert(gb, insert_pos, *p);
             insert_pos++;
         }
@@ -333,7 +338,7 @@ bool footnote_create_definition(GapBuffer *gb, const char *id) {
     insert_pos++;
     gap_insert(gb, insert_pos, '^');
     insert_pos++;
-    for (const char *p = id; *p; p++) {
+    for (const char* p = id; *p; p++) {
         gap_insert(gb, insert_pos, *p);
         insert_pos++;
     }
@@ -346,14 +351,17 @@ bool footnote_create_definition(GapBuffer *gb, const char *id) {
     return true;
 }
 
-void footnote_maybe_create_at_cursor(GapBuffer *gb, size_t cursor) {
-    if (cursor < 4) return;
+void footnote_maybe_create_at_cursor(GapBuffer* gb, size_t cursor)
+{
+    if (cursor < 4)
+        return;
 
     // Search backwards for a footnote reference near cursor
     for (size_t back = 3; back < 64 && back < cursor; back++) {
         size_t check_pos = cursor - back - 1;
         MdMatch ref;
-        if (!md_check_footnote_ref(gb, check_pos, &ref)) continue;
+        if (!md_check_footnote_ref(gb, check_pos, &ref))
+            continue;
 
         // Extract ID and create definition
         char id[64];

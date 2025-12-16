@@ -40,29 +40,29 @@ bool dawn_should_quit(void);
 //! Load a document from path
 //! @param path path to markdown file
 //! @return true on success
-bool dawn_load_document(const char *path);
+bool dawn_load_document(const char* path);
 
 //! Load a document in preview (read-only) mode
 //! @param path path to markdown file
 //! @return true on success
-bool dawn_preview_document(const char *path);
+bool dawn_preview_document(const char* path);
 
 //! Print a document (render linearly and exit)
 //! @param path path to markdown file
 //! @return true on success
-bool dawn_print_document(const char *path);
+bool dawn_print_document(const char* path);
 
 //! Print a buffer (render linearly and exit)
 //! @param content buffer containing markdown content
 //! @param size size of content buffer
 //! @return true on success
-bool dawn_print_buffer(const char *content, size_t size);
+bool dawn_print_buffer(const char* content, size_t size);
 
 //! Preview a buffer in read-only mode
 //! @param content buffer containing markdown content
 //! @param size size of content buffer
 //! @return true on success
-bool dawn_preview_buffer(const char *content, size_t size);
+bool dawn_preview_buffer(const char* content, size_t size);
 
 //! Start a new empty document
 void dawn_new_document(void);

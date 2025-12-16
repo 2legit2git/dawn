@@ -69,7 +69,7 @@ size_t nav_word_right(size_t pos);
 //! Get current selection range (normalized start < end)
 //! @param start output: selection start position
 //! @param end output: selection end position
-void get_selection(size_t *start, size_t *end);
+void get_selection(size_t* start, size_t* end);
 
 //! Check if there is an active selection
 //! @return true if selection exists and is non-empty

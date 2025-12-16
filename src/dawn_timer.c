@@ -5,9 +5,12 @@
 
 // #region Timer Operations
 
-int32_t timer_remaining(void) {
-    if (!app.timer_on || app.timer_mins == 0) return app.timer_mins * 60;
-    if (app.timer_paused) return (int32_t)app.timer_paused_at;
+int32_t timer_remaining(void)
+{
+    if (!app.timer_on || app.timer_mins == 0)
+        return app.timer_mins * 60;
+    if (app.timer_paused)
+        return (int32_t)app.timer_paused_at;
 
     int64_t now = DAWN_BACKEND(app)->clock(DAWN_CLOCK_SEC);
     int64_t elapsed = now - app.timer_start;
@@ -15,7 +18,8 @@ int32_t timer_remaining(void) {
     return left > 0 ? left : 0;
 }
 
-void timer_check(void) {
+void timer_check(void)
+{
     if (app.timer_on && !app.timer_paused && app.timer_mins > 0 && timer_remaining() == 0) {
         app.timer_on = false;
         app.timer_done = true;
@@ -26,8 +30,10 @@ void timer_check(void) {
     }
 }
 
-void timer_toggle_pause(void) {
-    if (!app.timer_on || app.timer_mins == 0) return;
+void timer_toggle_pause(void)
+{
+    if (!app.timer_on || app.timer_mins == 0)
+        return;
 
     int64_t now = DAWN_BACKEND(app)->clock(DAWN_CLOCK_SEC);
 
@@ -42,7 +48,8 @@ void timer_toggle_pause(void) {
     }
 }
 
-void timer_add_minutes(int32_t mins) {
+void timer_add_minutes(int32_t mins)
+{
     int64_t now = DAWN_BACKEND(app)->clock(DAWN_CLOCK_SEC);
 
     if (!app.timer_on) {

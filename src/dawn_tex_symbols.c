@@ -2,66 +2,68 @@
 
 #include "dawn_tex.h"
 #include "utf8proc/utf8proc.h"
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 
 // #region Mathematical Alphabets
 
 //! Unicode mathematical alphabets for font styling
 //! Each string contains 52 characters: A-Z then a-z
 
-static const char *ALPHABET_NORMAL =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+static const char* ALPHABET_NORMAL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
-static const char *ALPHABET_SERIF_IT =
-    "𝐴𝐵𝐶𝐷𝐸𝐹𝐺𝐻𝐼𝐽𝐾𝐿𝑀𝑁𝑂𝑃𝑄𝑅𝑆𝑇𝑈𝑉𝑊𝑋𝑌𝑍𝑎𝑏𝑐𝑑𝑒𝑓𝑔ℎ𝑖𝑗𝑘𝑙𝑚𝑛𝑜𝑝𝑞𝑟𝑠𝑡𝑢𝑣𝑤𝑥𝑦𝑧";
+static const char* ALPHABET_SERIF_IT = "𝐴𝐵𝐶𝐷𝐸𝐹𝐺𝐻𝐼𝐽𝐾𝐿𝑀𝑁𝑂𝑃𝑄𝑅𝑆𝑇𝑈𝑉𝑊𝑋𝑌𝑍𝑎𝑏𝑐𝑑𝑒𝑓𝑔ℎ𝑖𝑗𝑘𝑙𝑚𝑛𝑜𝑝𝑞𝑟𝑠𝑡𝑢𝑣𝑤𝑥𝑦𝑧";
 
-static const char *ALPHABET_SERIF_BLD =
-    "𝐀𝐁𝐂𝐃𝐄𝐅𝐆𝐇𝐈𝐉𝐊𝐋𝐌𝐍𝐎𝐏𝐐𝐑𝐒𝐓𝐔𝐕𝐖𝐗𝐘𝐙𝐚𝐛𝐜𝐝𝐞𝐟𝐠𝐡𝐢𝐣𝐤𝐥𝐦𝐧𝐨𝐩𝐪𝐫𝐬𝐭𝐮𝐯𝐰𝐱𝐲𝐳";
+static const char* ALPHABET_SERIF_BLD = "𝐀𝐁𝐂𝐃𝐄𝐅𝐆𝐇𝐈𝐉𝐊𝐋𝐌𝐍𝐎𝐏𝐐𝐑𝐒𝐓𝐔𝐕𝐖𝐗𝐘𝐙𝐚𝐛𝐜𝐝𝐞𝐟𝐠𝐡𝐢𝐣𝐤𝐥𝐦𝐧𝐨𝐩𝐪𝐫𝐬𝐭𝐮𝐯𝐰𝐱𝐲𝐳";
 
-static const char *ALPHABET_SERIF_ITBD =
-    "𝑨𝑩𝑪𝑫𝑬𝑭𝑮𝑯𝑰𝑱𝑲𝑳𝑴𝑵𝑶𝑷𝑸𝑹𝑺𝑻𝑼𝑽𝑾𝑿𝒀𝒁𝒂𝒃𝒄𝒅𝒆𝒇𝒈𝒉𝒊𝒋𝒌𝒍𝒎𝒏𝒐𝒑𝒒𝒓𝒔𝒕𝒖𝒗𝒘𝒙𝒚𝒛";
+static const char* ALPHABET_SERIF_ITBD = "𝑨𝑩𝑪𝑫𝑬𝑭𝑮𝑯𝑰𝑱𝑲𝑳𝑴𝑵𝑶𝑷𝑸𝑹𝑺𝑻𝑼𝑽𝑾𝑿𝒀𝒁𝒂𝒃𝒄𝒅𝒆𝒇𝒈𝒉𝒊𝒋𝒌𝒍𝒎𝒏𝒐𝒑𝒒𝒓𝒔𝒕𝒖𝒗𝒘𝒙𝒚𝒛";
 
-static const char *ALPHABET_SANS =
-    "𝖠𝖡𝖢𝖣𝖤𝖥𝖦𝖧𝖨𝖩𝖪𝖫𝖬𝖭𝖮𝖯𝖰𝖱𝖲𝖳𝖴𝖵𝖶𝖷𝖸𝖹𝖺𝖻𝖼𝖽𝖾𝖿𝗀𝗁𝗂𝗃𝗄𝗅𝗆𝗇𝗈𝗉𝗊𝗋𝗌𝗍𝗎𝗏𝗐𝗑𝗒𝗓";
+static const char* ALPHABET_SANS = "𝖠𝖡𝖢𝖣𝖤𝖥𝖦𝖧𝖨𝖩𝖪𝖫𝖬𝖭𝖮𝖯𝖰𝖱𝖲𝖳𝖴𝖵𝖶𝖷𝖸𝖹𝖺𝖻𝖼𝖽𝖾𝖿𝗀𝗁𝗂𝗃𝗄𝗅𝗆𝗇𝗈𝗉𝗊𝗋𝗌𝗍𝗎𝗏𝗐𝗑𝗒𝗓";
 
-static const char *ALPHABET_SANS_IT =
-    "𝘈𝘉𝘊𝘋𝘌𝘍𝘎𝘏𝘐𝘑𝘒𝘓𝘔𝘕𝘖𝘗𝘘𝘙𝘚𝘛𝘜𝘝𝘞𝘟𝘠𝘡𝘢𝘣𝘤𝘥𝘦𝘧𝘨𝘩𝘪𝘫𝘬𝘭𝘮𝘯𝘰𝘱𝘲𝘳𝘴𝘵𝘶𝘷𝘸𝘹𝘺𝘻";
+static const char* ALPHABET_SANS_IT = "𝘈𝘉𝘊𝘋𝘌𝘍𝘎𝘏𝘐𝘑𝘒𝘓𝘔𝘕𝘖𝘗𝘘𝘙𝘚𝘛𝘜𝘝𝘞𝘟𝘠𝘡𝘢𝘣𝘤𝘥𝘦𝘧𝘨𝘩𝘪𝘫𝘬𝘭𝘮𝘯𝘰𝘱𝘲𝘳𝘴𝘵𝘶𝘷𝘸𝘹𝘺𝘻";
 
-static const char *ALPHABET_SANS_BLD =
-    "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇";
+static const char* ALPHABET_SANS_BLD = "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇";
 
-static const char *ALPHABET_SANS_ITBD =
-    "𝘼𝘽𝘾𝘿𝙀𝙁𝙂𝙃𝙄𝙅𝙆𝙇𝙈𝙉𝙊𝙋𝙌𝙍𝙎𝙏𝙐𝙑𝙒𝙓𝙔𝙕𝙖𝙗𝙘𝙙𝙚𝙛𝙜𝙝𝙞𝙟𝙠𝙡𝙢𝙣𝙤𝙥𝙦𝙧𝙨𝙩𝙪𝙫𝙬𝙭𝙮𝙯";
+static const char* ALPHABET_SANS_ITBD = "𝘼𝘽𝘾𝘿𝙀𝙁𝙂𝙃𝙄𝙅𝙆𝙇𝙈𝙉𝙊𝙋𝙌𝙍𝙎𝙏𝙐𝙑𝙒𝙓𝙔𝙕𝙖𝙗𝙘𝙙𝙚𝙛𝙜𝙝𝙞𝙟𝙠𝙡𝙢𝙣𝙤𝙥𝙦𝙧𝙨𝙩𝙪𝙫𝙬𝙭𝙮𝙯";
 
-static const char *ALPHABET_MONO =
-    "𝙰𝙱𝙲𝙳𝙴𝙵𝙶𝙷𝙸𝙹𝙺𝙻𝙼𝙽𝙾𝙿𝚀𝚁𝚂𝚃𝚄𝚅𝚆𝚇𝚈𝚉𝚊𝚋𝚌𝚍𝚎𝚏𝚐𝚑𝚒𝚓𝚔𝚕𝚖𝚗𝚘𝚙𝚚𝚛𝚜𝚝𝚞𝚟𝚠𝚡𝚢𝚣";
+static const char* ALPHABET_MONO = "𝙰𝙱𝙲𝙳𝙴𝙵𝙶𝙷𝙸𝙹𝙺𝙻𝙼𝙽𝙾𝙿𝚀𝚁𝚂𝚃𝚄𝚅𝚆𝚇𝚈𝚉𝚊𝚋𝚌𝚍𝚎𝚏𝚐𝚑𝚒𝚓𝚔𝚕𝚖𝚗𝚘𝚙𝚚𝚛𝚜𝚝𝚞𝚟𝚠𝚡𝚢𝚣";
 
-static const char *ALPHABET_CALI_BLD =
-    "𝓐𝓑𝓒𝓓𝓔𝓕𝓖𝓗𝓘𝓙𝓚𝓛𝓜𝓝𝓞𝓟𝓠𝓡𝓢𝓣𝓤𝓥𝓦𝓧𝓨𝓩𝓪𝓫𝓬𝓭𝓮𝓯𝓰𝓱𝓲𝓳𝓴𝓵𝓶𝓷𝓸𝓹𝓺𝓻𝓼𝓽𝓾𝓿𝔀𝔁𝔂𝔃";
+static const char* ALPHABET_CALI_BLD = "𝓐𝓑𝓒𝓓𝓔𝓕𝓖𝓗𝓘𝓙𝓚𝓛𝓜𝓝𝓞𝓟𝓠𝓡𝓢𝓣𝓤𝓥𝓦𝓧𝓨𝓩𝓪𝓫𝓬𝓭𝓮𝓯𝓰𝓱𝓲𝓳𝓴𝓵𝓶𝓷𝓸𝓹𝓺𝓻𝓼𝓽𝓾𝓿𝔀𝔁𝔂𝔃";
 
-static const char *ALPHABET_FRAK_BLD =
-    "𝕬𝕭𝕮𝕯𝕰𝕱𝕲𝕳𝕴𝕵𝕶𝕷𝕸𝕹𝕺𝕻𝕼𝕽𝕾𝕿𝖀𝖁𝖂𝖃𝖄𝖅𝖆𝖇𝖈𝖉𝖊𝖋𝖌𝖍𝖎𝖏𝖐𝖑𝖒𝖓𝖔𝖕𝖖𝖗𝖘𝖙𝖚𝖛𝖜𝖝𝖞𝖟";
+static const char* ALPHABET_FRAK_BLD = "𝕬𝕭𝕮𝕯𝕰𝕱𝕲𝕳𝕴𝕵𝕶𝕷𝕸𝕹𝕺𝕻𝕼𝕽𝕾𝕿𝖀𝖁𝖂𝖃𝖄𝖅𝖆𝖇𝖈𝖉𝖊𝖋𝖌𝖍𝖎𝖏𝖐𝖑𝖒𝖓𝖔𝖕𝖖𝖗𝖘𝖙𝖚𝖛𝖜𝖝𝖞𝖟";
 
-static const char *ALPHABET_DOUBLE =
-    "𝔸𝔹ℂ𝔻𝔼𝔽𝔾ℍ𝕀𝕁𝕂𝕃𝕄ℕ𝕆ℙℚℝ𝕊𝕋𝕌𝕍𝕎𝕏𝕐ℤ𝕒𝕓𝕔𝕕𝕖𝕗𝕘𝕙𝕚𝕛𝕜𝕝𝕞𝕟𝕠𝕡𝕢𝕣𝕤𝕥𝕦𝕧𝕨𝕩𝕪𝕫";
+static const char* ALPHABET_DOUBLE = "𝔸𝔹ℂ𝔻𝔼𝔽𝔾ℍ𝕀𝕁𝕂𝕃𝕄ℕ𝕆ℙℚℝ𝕊𝕋𝕌𝕍𝕎𝕏𝕐ℤ𝕒𝕓𝕔𝕕𝕖𝕗𝕘𝕙𝕚𝕛𝕜𝕝𝕞𝕟𝕠𝕡𝕢𝕣𝕤𝕥𝕦𝕧𝕨𝕩𝕪𝕫";
 
 //! Get alphabet for a font style
-const char *tex_get_alphabet(TexFontStyle style) {
+const char* tex_get_alphabet(TexFontStyle style)
+{
     switch (style) {
-        case TEX_FONT_NORMAL:    return ALPHABET_NORMAL;
-        case TEX_FONT_SERIF_IT:  return ALPHABET_SERIF_IT;
-        case TEX_FONT_SERIF_BLD: return ALPHABET_SERIF_BLD;
-        case TEX_FONT_SERIF_ITBD: return ALPHABET_SERIF_ITBD;
-        case TEX_FONT_SANS:      return ALPHABET_SANS;
-        case TEX_FONT_SANS_IT:   return ALPHABET_SANS_IT;
-        case TEX_FONT_SANS_BLD:  return ALPHABET_SANS_BLD;
-        case TEX_FONT_SANS_ITBD: return ALPHABET_SANS_ITBD;
-        case TEX_FONT_MONO:      return ALPHABET_MONO;
-        case TEX_FONT_CALI:      return ALPHABET_CALI_BLD;
-        case TEX_FONT_FRAK:      return ALPHABET_FRAK_BLD;
-        case TEX_FONT_DOUBLE:    return ALPHABET_DOUBLE;
-        default:                 return ALPHABET_NORMAL;
+    case TEX_FONT_NORMAL:
+        return ALPHABET_NORMAL;
+    case TEX_FONT_SERIF_IT:
+        return ALPHABET_SERIF_IT;
+    case TEX_FONT_SERIF_BLD:
+        return ALPHABET_SERIF_BLD;
+    case TEX_FONT_SERIF_ITBD:
+        return ALPHABET_SERIF_ITBD;
+    case TEX_FONT_SANS:
+        return ALPHABET_SANS;
+    case TEX_FONT_SANS_IT:
+        return ALPHABET_SANS_IT;
+    case TEX_FONT_SANS_BLD:
+        return ALPHABET_SANS_BLD;
+    case TEX_FONT_SANS_ITBD:
+        return ALPHABET_SANS_ITBD;
+    case TEX_FONT_MONO:
+        return ALPHABET_MONO;
+    case TEX_FONT_CALI:
+        return ALPHABET_CALI_BLD;
+    case TEX_FONT_FRAK:
+        return ALPHABET_FRAK_BLD;
+    case TEX_FONT_DOUBLE:
+        return ALPHABET_DOUBLE;
+    default:
+        return ALPHABET_NORMAL;
     }
 }
 
@@ -72,9 +74,9 @@ const char *tex_get_alphabet(TexFontStyle style) {
 //! Unicode superscript and subscript characters
 //! Each entry: { base_char, superscript, subscript }
 typedef struct {
-    const char *normal;
-    const char *super;
-    const char *sub;
+    const char* normal;
+    const char* super;
+    const char* sub;
 } ScriptPair;
 
 static const ScriptPair SCRIPT_CHARS[] = {
@@ -123,8 +125,10 @@ static const ScriptPair SCRIPT_CHARS[] = {
 
 //! Try to convert a character to superscript
 //! @return Superscript string or NULL if not available
-const char *tex_to_superscript(const char *c) {
-    if (!c) return NULL;
+const char* tex_to_superscript(const char* c)
+{
+    if (!c)
+        return NULL;
     for (int32_t i = 0; SCRIPT_CHARS[i].normal != NULL; i++) {
         if (strcmp(SCRIPT_CHARS[i].normal, c) == 0) {
             if (SCRIPT_CHARS[i].super[0] != ' ' || c[0] == ' ') {
@@ -138,8 +142,10 @@ const char *tex_to_superscript(const char *c) {
 
 //! Try to convert a character to subscript
 //! @return Subscript string or NULL if not available
-const char *tex_to_subscript(const char *c) {
-    if (!c) return NULL;
+const char* tex_to_subscript(const char* c)
+{
+    if (!c)
+        return NULL;
     for (int32_t i = 0; SCRIPT_CHARS[i].normal != NULL; i++) {
         if (strcmp(SCRIPT_CHARS[i].normal, c) == 0) {
             if (SCRIPT_CHARS[i].sub[0] != ' ' || c[0] == ' ') {
@@ -153,11 +159,12 @@ const char *tex_to_subscript(const char *c) {
 
 //! Unshrink a script character back to normal
 //! @return Normal character string or NULL if not found
-const char *tex_unshrink_char(const char *c) {
-    if (!c) return NULL;
+const char* tex_unshrink_char(const char* c)
+{
+    if (!c)
+        return NULL;
     for (int32_t i = 0; SCRIPT_CHARS[i].normal != NULL; i++) {
-        if (strcmp(SCRIPT_CHARS[i].super, c) == 0 ||
-            strcmp(SCRIPT_CHARS[i].sub, c) == 0) {
+        if (strcmp(SCRIPT_CHARS[i].super, c) == 0 || strcmp(SCRIPT_CHARS[i].sub, c) == 0) {
             return SCRIPT_CHARS[i].normal;
         }
     }
@@ -169,8 +176,8 @@ const char *tex_unshrink_char(const char *c) {
 // #region Math Symbols
 
 typedef struct {
-    const char *name;
-    const char *symbol;
+    const char* name;
+    const char* symbol;
 } TexSymbol;
 
 static const TexSymbol TEX_SYMBOLS[] = {
@@ -316,7 +323,8 @@ static const TexSymbol TEX_SYMBOLS[] = {
 
 //! Look up a command symbol
 //! @return Symbol string or NULL if not found
-const char *tex_lookup_symbol(const char *name) {
+const char* tex_lookup_symbol(const char* name)
+{
     for (int32_t i = 0; TEX_SYMBOLS[i].name != NULL; i++) {
         if (strcmp(TEX_SYMBOLS[i].name, name) == 0) {
             return TEX_SYMBOLS[i].symbol;
@@ -332,21 +340,21 @@ const char *tex_lookup_symbol(const char *name) {
 //! Multi-line operator data
 //! Format: concatenated rows, each row has 'width' characters
 typedef struct {
-    const char *name;
-    const char *art;      //! Concatenated row data
+    const char* name;
+    const char* art; //! Concatenated row data
     int32_t height;
     int32_t width;
     int32_t horizon;
 } TexMultilineOp;
 
 static const TexMultilineOp TEX_MULTILINE_OPS[] = {
-    { "sum",   "┰─╴▐╸ ┸─╴", 3, 3, 1 },
-    { "prod",  "┰─┰┃ ┃┸ ┸", 3, 3, 1 },
-    { "int32_t",   "⌠│⌡", 3, 1, 1 },
-    { "iint",  "⌠⌠││⌡⌡", 3, 2, 1 },
+    { "sum", "┰─╴▐╸ ┸─╴", 3, 3, 1 },
+    { "prod", "┰─┰┃ ┃┸ ┸", 3, 3, 1 },
+    { "int32_t", "⌠│⌡", 3, 1, 1 },
+    { "iint", "⌠⌠││⌡⌡", 3, 2, 1 },
     { "iiint", "⌠⌠⌠│││⌡⌡⌡", 3, 3, 1 },
     { "idotsint", "⌠ ⌠│⋯│⌡ ⌡", 3, 3, 1 },
-    { "oint",  " ⌠ ╶╪╴ ⌡ ", 3, 3, 1 },
+    { "oint", " ⌠ ╶╪╴ ⌡ ", 3, 3, 1 },
     { "oiint", " ⌠⌠ ╶╪╪╴ ⌡⌡ ", 3, 4, 1 },
     { "oiiint", " ⌠⌠⌠ ╺╪╪╪╸ ⌡⌡⌡ ", 3, 5, 1 },
     { NULL, NULL, 0, 0, 0 }
@@ -354,7 +362,8 @@ static const TexMultilineOp TEX_MULTILINE_OPS[] = {
 
 //! Get multi-line operator art
 //! @return Concatenated row string or NULL if not found
-const char *tex_get_multiline_op(const char *name, int32_t *out_height, int32_t *out_width, int32_t *out_horizon) {
+const char* tex_get_multiline_op(const char* name, int32_t* out_height, int32_t* out_width, int32_t* out_horizon)
+{
     for (int32_t i = 0; TEX_MULTILINE_OPS[i].name != NULL; i++) {
         if (strcmp(TEX_MULTILINE_OPS[i].name, name) == 0) {
             *out_height = TEX_MULTILINE_OPS[i].height;
@@ -372,19 +381,21 @@ const char *tex_get_multiline_op(const char *name, int32_t *out_height, int32_t 
 
 //! Delimiter character lookup
 //! Format: sgl (single), top, ctr (center), fil (fill), btm (bottom)
-static const char *DELIMITER_SGL = "(){}[]⌊⌋⌈⌉||‖‖";
-static const char *DELIMITER_TOP = "⎛⎞⎧⎫⎡⎤⎢⎥⎡⎤⎟⎜║║";
-static const char *DELIMITER_CTR = "⎜⎟⎨⎬⎢⎥⎢⎥⎢⎥⎟⎜║║";
-static const char *DELIMITER_FIL = "⎜⎟⎪⎪⎢⎥⎢⎥⎢⎥⎟⎜║║";
-static const char *DELIMITER_BTM = "⎝⎠⎩⎭⎣⎦⎣⎦⎢⎥⎟⎜║║";
+static const char* DELIMITER_SGL = "(){}[]⌊⌋⌈⌉||‖‖";
+static const char* DELIMITER_TOP = "⎛⎞⎧⎫⎡⎤⎢⎥⎡⎤⎟⎜║║";
+static const char* DELIMITER_CTR = "⎜⎟⎨⎬⎢⎥⎢⎥⎢⎥⎟⎜║║";
+static const char* DELIMITER_FIL = "⎜⎟⎪⎪⎢⎥⎢⎥⎢⎥⎟⎜║║";
+static const char* DELIMITER_BTM = "⎝⎠⎩⎭⎣⎦⎣⎦⎢⎥⎟⎜║║";
 
 //! Find character index in delimiter string
-static int32_t find_delim_index(char c) {
-    const char *p = DELIMITER_SGL;
+static int32_t find_delim_index(char c)
+{
+    const char* p = DELIMITER_SGL;
     int32_t idx = 0;
     while (*p) {
         int32_t len = utf8proc_utf8class[(uint8_t)*p];
-        if (len < 1) len = 1;
+        if (len < 1)
+            len = 1;
 
         // Compare single byte for ASCII
         if (len == 1 && *p == c) {
@@ -397,19 +408,23 @@ static int32_t find_delim_index(char c) {
 }
 
 //! Get UTF-8 char at index
-static const char *get_utf8_at_index(const char *s, int32_t idx) {
+static const char* get_utf8_at_index(const char* s, int32_t idx)
+{
     static char buf[8];
-    const uint8_t *p = (const uint8_t *)s;
+    const uint8_t* p = (const uint8_t*)s;
     int32_t i = 0;
     while (*p && i < idx) {
         int32_t len = utf8proc_utf8class[*p];
-        if (len < 1) len = 1;
+        if (len < 1)
+            len = 1;
         p += len;
         i++;
     }
-    if (!*p) return NULL;
+    if (!*p)
+        return NULL;
     int32_t len = utf8proc_utf8class[*p];
-    if (len < 1) len = 1;
+    if (len < 1)
+        len = 1;
     memcpy(buf, p, len);
     buf[len] = '\0';
     return buf;
@@ -418,17 +433,29 @@ static const char *get_utf8_at_index(const char *s, int32_t idx) {
 //! Get delimiter character for position
 //! @param delim Single delimiter character
 //! @param position TexDelimPos enum value
-const char *tex_get_delimiter_char(char delim, TexDelimPos position) {
+const char* tex_get_delimiter_char(char delim, TexDelimPos position)
+{
     int32_t idx = find_delim_index(delim);
-    if (idx < 0) return NULL;
+    if (idx < 0)
+        return NULL;
 
-    const char *lookup = NULL;
+    const char* lookup = NULL;
     switch (position) {
-        case TEX_DELIM_SGL: lookup = DELIMITER_SGL; break;
-        case TEX_DELIM_TOP: lookup = DELIMITER_TOP; break;
-        case TEX_DELIM_CTR: lookup = DELIMITER_CTR; break;
-        case TEX_DELIM_FIL: lookup = DELIMITER_FIL; break;
-        case TEX_DELIM_BTM: lookup = DELIMITER_BTM; break;
+    case TEX_DELIM_SGL:
+        lookup = DELIMITER_SGL;
+        break;
+    case TEX_DELIM_TOP:
+        lookup = DELIMITER_TOP;
+        break;
+    case TEX_DELIM_CTR:
+        lookup = DELIMITER_CTR;
+        break;
+    case TEX_DELIM_FIL:
+        lookup = DELIMITER_FIL;
+        break;
+    case TEX_DELIM_BTM:
+        lookup = DELIMITER_BTM;
+        break;
     }
 
     return get_utf8_at_index(lookup, idx);
@@ -439,12 +466,12 @@ const char *tex_get_delimiter_char(char delim, TexDelimPos position) {
 // #region Accent Combining Characters
 
 typedef struct {
-    const char *name;
-    const char *combining;
+    const char* name;
+    const char* combining;
 } TexAccent;
 
 static const TexAccent TEX_ACCENTS[] = {
-    { "acute", "\u0302" },      // Note: Python has 0302 for acute, which is actually circumflex
+    { "acute", "\u0302" }, // Note: Python has 0302 for acute, which is actually circumflex
     { "bar", "\u0304" },
     { "breve", "\u0306" },
     { "check", "\u030C" },
@@ -461,7 +488,8 @@ static const TexAccent TEX_ACCENTS[] = {
 };
 
 //! Get accent combining character
-const char *tex_get_accent(const char *name) {
+const char* tex_get_accent(const char* name)
+{
     for (int32_t i = 0; TEX_ACCENTS[i].name != NULL; i++) {
         if (strcmp(TEX_ACCENTS[i].name, name) == 0) {
             return TEX_ACCENTS[i].combining;
@@ -475,24 +503,28 @@ const char *tex_get_accent(const char *name) {
 // #region Font Reversion
 
 //! Search a single alphabet string for a character, return ASCII if found
-static char search_alphabet(const char *alphabet, const char *ch) {
-    const uint8_t *alpha = (const uint8_t *)alphabet;
-    const uint8_t *target = (const uint8_t *)ch;
+static char search_alphabet(const char* alphabet, const char* ch)
+{
+    const uint8_t* alpha = (const uint8_t*)alphabet;
+    const uint8_t* target = (const uint8_t*)ch;
     size_t alpha_len = strlen(alphabet);
     size_t target_len = strlen(ch);
 
-    if (target_len == 0) return 0;
+    if (target_len == 0)
+        return 0;
 
     size_t pos = 0;
     int32_t index = 0;
 
     while (pos < alpha_len) {
         int32_t len = utf8proc_utf8class[alpha[pos]];
-        if (len < 1) len = 1;
+        if (len < 1)
+            len = 1;
 
         if ((size_t)len == target_len && memcmp(alpha + pos, target, len) == 0) {
             // Found! Index 0-25 = A-Z, 26-51 = a-z
-            if (index < 26) return 'A' + index;
+            if (index < 26)
+                return 'A' + index;
             return 'a' + (index - 26);
         }
 
@@ -504,8 +536,10 @@ static char search_alphabet(const char *alphabet, const char *ch) {
 
 //! Revert a styled character back to ASCII
 //! @return ASCII character or 0 if not found
-char tex_revert_font_char(const char *ch) {
-    if (!ch || !*ch) return 0;
+char tex_revert_font_char(const char* ch)
+{
+    if (!ch || !*ch)
+        return 0;
 
     // ASCII passthrough
     if ((uint8_t)ch[0] < 128) {
@@ -514,17 +548,28 @@ char tex_revert_font_char(const char *ch) {
 
     // Search all mathematical alphabets
     char result;
-    if ((result = search_alphabet(ALPHABET_SERIF_IT, ch))) return result;
-    if ((result = search_alphabet(ALPHABET_SERIF_BLD, ch))) return result;
-    if ((result = search_alphabet(ALPHABET_SERIF_ITBD, ch))) return result;
-    if ((result = search_alphabet(ALPHABET_SANS, ch))) return result;
-    if ((result = search_alphabet(ALPHABET_SANS_IT, ch))) return result;
-    if ((result = search_alphabet(ALPHABET_SANS_BLD, ch))) return result;
-    if ((result = search_alphabet(ALPHABET_SANS_ITBD, ch))) return result;
-    if ((result = search_alphabet(ALPHABET_MONO, ch))) return result;
-    if ((result = search_alphabet(ALPHABET_CALI_BLD, ch))) return result;
-    if ((result = search_alphabet(ALPHABET_FRAK_BLD, ch))) return result;
-    if ((result = search_alphabet(ALPHABET_DOUBLE, ch))) return result;
+    if ((result = search_alphabet(ALPHABET_SERIF_IT, ch)))
+        return result;
+    if ((result = search_alphabet(ALPHABET_SERIF_BLD, ch)))
+        return result;
+    if ((result = search_alphabet(ALPHABET_SERIF_ITBD, ch)))
+        return result;
+    if ((result = search_alphabet(ALPHABET_SANS, ch)))
+        return result;
+    if ((result = search_alphabet(ALPHABET_SANS_IT, ch)))
+        return result;
+    if ((result = search_alphabet(ALPHABET_SANS_BLD, ch)))
+        return result;
+    if ((result = search_alphabet(ALPHABET_SANS_ITBD, ch)))
+        return result;
+    if ((result = search_alphabet(ALPHABET_MONO, ch)))
+        return result;
+    if ((result = search_alphabet(ALPHABET_CALI_BLD, ch)))
+        return result;
+    if ((result = search_alphabet(ALPHABET_FRAK_BLD, ch)))
+        return result;
+    if ((result = search_alphabet(ALPHABET_DOUBLE, ch)))
+        return result;
 
     return 0;
 }
@@ -534,7 +579,7 @@ char tex_revert_font_char(const char *ch) {
 // #region Font Command Mapping
 
 typedef struct {
-    const char *name;
+    const char* name;
     TexFontStyle style;
 } TexFontCmd;
 
@@ -554,7 +599,8 @@ static const TexFontCmd TEX_FONT_CMDS[] = {
 };
 
 //! Get font style for a command
-TexFontStyle tex_get_font_style(const char *name) {
+TexFontStyle tex_get_font_style(const char* name)
+{
     for (int32_t i = 0; TEX_FONT_CMDS[i].name != NULL; i++) {
         if (strcmp(TEX_FONT_CMDS[i].name, name) == 0) {
             return TEX_FONT_CMDS[i].style;
@@ -568,7 +614,7 @@ TexFontStyle tex_get_font_style(const char *name) {
 // #region Command Type Lookup
 
 typedef struct {
-    const char *cmd;
+    const char* cmd;
     TexNodeType type;
 } TexCmdType;
 
@@ -661,8 +707,10 @@ static const TexCmdType CMD_TYPES[] = {
 };
 
 //! Look up node type for a command
-TexNodeType tex_lookup_cmd_type(const char *cmd) {
-    if (!cmd) return TEX_NT_NONE;
+TexNodeType tex_lookup_cmd_type(const char* cmd)
+{
+    if (!cmd)
+        return TEX_NT_NONE;
 
     // Check font commands first
     for (int32_t i = 0; TEX_FONT_CMDS[i].name != NULL; i++) {
@@ -695,7 +743,7 @@ TexNodeType tex_lookup_cmd_type(const char *cmd) {
 typedef struct {
     TexNodeType parent;
     TexTokenType tok_type;
-    const char *value;
+    const char* value;
     TexNodeType result;
 } TexParentDepType;
 
@@ -737,13 +785,13 @@ static const TexParentDepType PARENT_DEP_TYPES[] = {
 };
 
 //! Get node type based on parent context
-TexNodeType tex_get_parent_dep_type(TexNodeType parent, TexTokenType tok_type, const char *value) {
-    if (!value) return TEX_NT_NONE;
+TexNodeType tex_get_parent_dep_type(TexNodeType parent, TexTokenType tok_type, const char* value)
+{
+    if (!value)
+        return TEX_NT_NONE;
 
     for (int32_t i = 0; PARENT_DEP_TYPES[i].value != NULL; i++) {
-        if (PARENT_DEP_TYPES[i].parent == parent &&
-            PARENT_DEP_TYPES[i].tok_type == tok_type &&
-            strcmp(PARENT_DEP_TYPES[i].value, value) == 0) {
+        if (PARENT_DEP_TYPES[i].parent == parent && PARENT_DEP_TYPES[i].tok_type == tok_type && strcmp(PARENT_DEP_TYPES[i].value, value) == 0) {
             return PARENT_DEP_TYPES[i].result;
         }
     }
